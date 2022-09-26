@@ -267,18 +267,6 @@ interface IPool {
     ) external;
 
     /**
-     * @notice Same as `supplyERC721` but this can only be called by NToken contract and doesn't require sending the underlying asset.
-     * @param asset The address of the underlying asset to supply
-     * @param tokenData The list of tokenIds and their collateral configs to be supplied
-     * @param onBehalfOf The address that will receive the xTokens
-     **/
-    function supplyERC721FromNToken(
-        address asset,
-        DataTypes.ERC721SupplyParams[] calldata tokenData,
-        address onBehalfOf
-    ) external;
-
-    /**
      * @notice Supply with transfer approval of asset to be supplied done via permit function
      * see: https://eips.ethereum.org/EIPS/eip-2612 and https://eips.ethereum.org/EIPS/eip-713
      * @param asset The address of the underlying asset to supply

@@ -93,6 +93,7 @@ library DataTypes {
     struct ERC721SupplyParams {
         uint256 tokenId;
         bool useAsCollateral;
+        bool useNToken;
     }
 
     struct NTokenData {

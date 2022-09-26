@@ -152,11 +152,13 @@ library SupplyLogic {
         }
 
         for (uint256 index = 0; index < amount; index++) {
-            IERC721(params.asset).safeTransferFrom(
-                params.actualSpender,
-                reserveCache.xTokenAddress,
-                params.tokenData[index].tokenId
-            );
+            if (!params.tokenData[index].useNToken) {
+                IERC721(params.asset).safeTransferFrom(
+                    params.actualSpender,
+                    reserveCache.xTokenAddress,
+                    params.tokenData[index].tokenId
+                );
+            }
         }
 
         bool isFirstCollaterarized = INToken(reserveCache.xTokenAddress).mint(
@@ -174,43 +176,6 @@ library SupplyLogic {
         emit SupplyERC721(
             params.asset,
             params.actualSpender,
-            params.onBehalfOf,
-            params.tokenData,
-            params.referralCode
-        );
-    }
-
-    function executeSupplyERC721FromNToken(
-        mapping(address => DataTypes.ReserveData) storage reservesData,
-        DataTypes.UserConfigurationMap storage userConfig,
-        DataTypes.ExecuteSupplyERC721Params memory params
-    ) external {
-        DataTypes.ReserveData storage reserve = reservesData[params.asset];
-        DataTypes.ReserveCache memory reserveCache = reserve.cache();
-
-        reserve.updateState(reserveCache);
-
-        ValidationLogic.validateSupplyFromNToken(
-            reserveCache,
-            params,
-            DataTypes.AssetType.ERC721
-        );
-
-        bool isFirstCollaterarized = INToken(reserveCache.xTokenAddress).mint(
-            params.onBehalfOf,
-            params.tokenData
-        );
-        if (isFirstCollaterarized) {
-            userConfig.setUsingAsCollateral(reserve.id, true);
-            emit ReserveUsedAsCollateralEnabled(
-                params.asset,
-                params.onBehalfOf
-            );
-        }
-
-        emit SupplyERC721(
-            params.asset,
-            msg.sender,
             params.onBehalfOf,
             params.tokenData,
             params.referralCode

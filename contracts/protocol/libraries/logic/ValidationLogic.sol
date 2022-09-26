@@ -57,13 +57,14 @@ library ValidationLogic {
     /**
      * @notice Validates a supply action.
      * @param reserveCache The cached data of the reserve
-     * @param amount The amount to be supplied
+     * @param params The additional parameters
      */
     function validateSupply(
         DataTypes.ReserveCache memory reserveCache,
-        uint256 amount,
+        DataTypes.ExecuteSupplyERC721Params memory params,
         DataTypes.AssetType assetType
     ) internal view {
+        uint256 amount = params.tokenData.length;
         require(amount != 0, Errors.INVALID_AMOUNT);
         require(reserveCache.assetType == assetType, Errors.INVALID_ASSET_TYPE);
 
@@ -94,45 +95,24 @@ library ValidationLogic {
                         supplyCap),
                 Errors.SUPPLY_CAP_EXCEEDED
             );
-        }
-    }
-
-    /**
-     * @notice Validates a supply action from NToken contract
-     * @param reserveCache The cached data of the reserve
-     * @param params The params of the supply
-     * @param assetType the type of the asset supplied
-     */
-    function validateSupplyFromNToken(
-        DataTypes.ReserveCache memory reserveCache,
-        DataTypes.ExecuteSupplyERC721Params memory params,
-        DataTypes.AssetType assetType
-    ) internal view {
-        // TODO check if this is needed
-        // require(
-        //     msg.sender == reserveCache.xTokenAddress,
-        //     Errors.SUPPLIER_NOT_NTOKEN
-        // );
-
-        uint256 amount = params.tokenData.length;
-
-        validateSupply(reserveCache, amount, assetType);
-
-        for (uint256 index = 0; index < amount; index++) {
-            // validate that the owner of the underlying asset is the NToken  contract
-            require(
-                IERC721(params.asset).ownerOf(
-                    params.tokenData[index].tokenId
-                ) == reserveCache.xTokenAddress,
-                Errors.NOT_THE_OWNER
-            );
-            // validate that the owner of the ntoken that has the same tokenId is the zero address
-            require(
-                IERC721(reserveCache.xTokenAddress).ownerOf(
-                    params.tokenData[index].tokenId
-                ) == address(0x0),
-                Errors.NOT_THE_OWNER
-            );
+            for (uint256 index = 0; index < amount; index++) {
+                if (params.tokenData[index].useNToken) {
+                    // validate that the owner of the underlying asset is the NToken contract
+                    require(
+                        IERC721(params.asset).ownerOf(
+                            params.tokenData[index].tokenId
+                        ) == reserveCache.xTokenAddress,
+                        Errors.NOT_THE_OWNER
+                    );
+                    // validate that the owner of the ntoken that has the same tokenId is the zero address
+                    require(
+                        IERC721(reserveCache.xTokenAddress).ownerOf(
+                            params.tokenData[index].tokenId
+                        ) == address(0x0),
+                        Errors.NOT_THE_OWNER
+                    );
+                }
+            }
         }
     }
 
