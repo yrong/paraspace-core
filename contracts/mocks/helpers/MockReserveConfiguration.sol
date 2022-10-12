@@ -2,15 +2,12 @@
 pragma solidity 0.8.10;
 
 import {ReserveConfiguration} from "../../protocol/libraries/configuration/ReserveConfiguration.sol";
-import {AuctionConfiguration} from "../../protocol/libraries/configuration/AuctionConfiguration.sol";
 import {DataTypes} from "../../protocol/libraries/types/DataTypes.sol";
 
 contract MockReserveConfiguration {
     using ReserveConfiguration for DataTypes.ReserveConfigurationMap;
-    using AuctionConfiguration for DataTypes.ReserveAuctionConfigurationMap;
 
     DataTypes.ReserveConfigurationMap public configuration;
-    DataTypes.ReserveAuctionConfigurationMap public auctionConfiguration;
 
     function setLtv(uint256 ltv) external {
         DataTypes.ReserveConfigurationMap memory config = configuration;
@@ -50,6 +47,16 @@ contract MockReserveConfiguration {
 
     function getDecimals() external view returns (uint256) {
         return configuration.getDecimals();
+    }
+
+    function setAssetType(DataTypes.AssetType assetType) external {
+        DataTypes.ReserveConfigurationMap memory config = configuration;
+        config.setAssetType(assetType);
+        configuration = config;
+    }
+
+    function getAssetType() external view returns (DataTypes.AssetType) {
+        return configuration.getAssetType();
     }
 
     function setFrozen(bool frozen) external {
@@ -132,7 +139,8 @@ contract MockReserveConfiguration {
             bool,
             bool,
             bool,
-            bool
+            bool,
+            DataTypes.AssetType
         )
     {
         return configuration.getFlags();
@@ -146,7 +154,8 @@ contract MockReserveConfiguration {
             uint256,
             uint256,
             uint256,
-            uint256
+            uint256,
+            bool
         )
     {
         return configuration.getParams();
@@ -154,29 +163,5 @@ contract MockReserveConfiguration {
 
     function getCaps() external view returns (uint256, uint256) {
         return configuration.getCaps();
-    }
-
-    function setAuctionEnabled(
-        bool enabled
-    ) external {
-        DataTypes.ReserveAuctionConfigurationMap memory config = auctionConfiguration;
-        config.setAuctionEnabled(enabled);
-        auctionConfiguration = config;
-    }
-
-    function getAuctionEnabled() external view returns (bool) {
-        return auctionConfiguration.getAuctionEnabled();
-    }
-
-    function setAuctionRecoveryHealthFactor(
-        uint256 auctionRecoveryHealthFactor
-    ) external {
-        DataTypes.ReserveAuctionConfigurationMap memory config = auctionConfiguration;
-        config.setAuctionRecoveryHealthFactor(auctionRecoveryHealthFactor);
-        auctionConfiguration = config;
-    }
-
-    function getAuctionRecoveryHealthFactor() external view returns (uint256) {
-        return auctionConfiguration.getAuctionRecoveryHealthFactor();
     }
 }

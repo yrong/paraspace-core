@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.10;
 
-import {OwnableUpgradeable} from "../dependencies/openzeppelin/contracts/proxy/OwnableUpgradeable.sol";
+import {OwnableUpgradeable} from "../dependencies/openzeppelin/upgradeability/OwnableUpgradeable.sol";
 import {IPool} from "../interfaces/IPool.sol";
 import {DataTypes} from "../protocol/libraries/types/DataTypes.sol";
 
@@ -35,12 +35,10 @@ contract UniswapV3Gateway is IERC721Receiver, OwnableUpgradeable {
     /**
      * @dev supplies (deposits) UniswapV3 into the reserve. A corresponding amount of the overlying asset (xTokens)
      * is minted.
-     * @param pool address of the targeted underlying pool
      * @param tokenIds tokens to supply to gateway
      * @param onBehalfOf address of the user who will receive the xTokens representing the supply
      **/
     function supplyUniswapV3(
-        address pool,
         DataTypes.ERC721SupplyParams[] calldata tokenIds,
         address onBehalfOf
     ) external {

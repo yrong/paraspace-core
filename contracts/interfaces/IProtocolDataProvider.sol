@@ -103,11 +103,6 @@ interface IProtocolDataProvider {
             bool isFrozen
         );
 
-    function getReserveAuctionConfigurationData(address asset)
-        external
-        view
-        returns (bool, uint256);
-
     /**
      * @notice Returns the caps parameters of the reserve
      * @param asset The address of the underlying asset of the reserve
@@ -132,13 +127,6 @@ interface IProtocolDataProvider {
      * @return True if the asset is siloed for borrowing
      **/
     function getSiloedBorrowing(address asset) external view returns (bool);
-
-    function getAuctionEnabled(address asset) external view returns (bool);
-
-    function getAuctionRecoveryHealthFactor(address asset)
-        external
-        view
-        returns (uint256);
 
     /**
      * @notice Returns the protocol fee on the liquidation bonus
@@ -199,10 +187,16 @@ interface IProtocolDataProvider {
     /**
      * @notice Returns the address of the Interest Rate strategy
      * @param asset The address of the underlying asset of the reserve
-     * @return irStrategyAddress The address of the Interest Rate strategy
+     * @return interestRateStrategyAddress The address of the Interest Rate strategy
+     * @return dynamicConfigsStrategyAddress The address of the DynamicConfigs strategy
+     * @return auctionStrategyAddress The address of the Auction strategy
      */
-    function getInterestRateStrategyAddress(address asset)
+    function getStrategyAddresses(address asset)
         external
         view
-        returns (address irStrategyAddress);
+        returns (
+            address interestRateStrategyAddress,
+            address dynamicConfigsStrategyAddress,
+            address auctionStrategyAddress
+        );
 }

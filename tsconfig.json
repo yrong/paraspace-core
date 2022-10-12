@@ -8,9 +8,15 @@
     "noImplicitAny": false,
     "resolveJsonModule": true
   },
-  "include": [],
+  "include": [
+    "./test-suites",
+    "./deploy/tasks"
+  ],
+  "exclude": [
+    "./deploy/helpers/seaport-helpers",
+    "./test-suites/helpers"
+  ],
   "files": [
-    "./hardhat.config.ts",
-    "node_modules/hardhat-typechain/src/type-extensions.ts"
+    "./hardhat.config.ts"
   ]
 }

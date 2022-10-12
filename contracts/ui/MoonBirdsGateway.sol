@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.10;
 
-import {OwnableUpgradeable} from "../dependencies/openzeppelin/contracts/proxy/OwnableUpgradeable.sol";
+import {OwnableUpgradeable} from "../dependencies/openzeppelin/upgradeability/OwnableUpgradeable.sol";
 import {IPool} from "../interfaces/IPool.sol";
 import {DataTypes} from "../protocol/libraries/types/DataTypes.sol";
 
@@ -34,13 +34,11 @@ contract MoonBirdsGateway is IERC721Receiver, OwnableUpgradeable {
     /**
      * @dev supplies (deposits) WPunk into the reserve, using native Punk. A corresponding amount of the overlying asset (xTokens)
      * is minted.
-     * @param pool address of the targeted underlying pool
      * @param tokenIds tokens to supply to gateway
      * @param onBehalfOf address of the user who will receive the xTokens representing the supply
      * @param referralCode integrators are assigned a referral code and can potentially receive rewards.
      **/
     function supplyMoonBirds(
-        address pool,
         DataTypes.ERC721SupplyParams[] calldata tokenIds,
         address onBehalfOf,
         uint16 referralCode

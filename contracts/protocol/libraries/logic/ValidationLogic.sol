@@ -16,7 +16,6 @@ import {INToken} from "../../../interfaces/INToken.sol";
 import {SignatureChecker} from "../../../dependencies/looksrare/contracts/libraries/SignatureChecker.sol";
 import {IPriceOracleSentinel} from "../../../interfaces/IPriceOracleSentinel.sol";
 import {ReserveConfiguration} from "../configuration/ReserveConfiguration.sol";
-import {AuctionConfiguration} from "../configuration/AuctionConfiguration.sol";
 import {UserConfiguration} from "../configuration/UserConfiguration.sol";
 import {Errors} from "../helpers/Errors.sol";
 import {WadRayMath} from "../math/WadRayMath.sol";
@@ -36,7 +35,6 @@ library ValidationLogic {
     using WadRayMath for uint256;
     using PercentageMath for uint256;
     using ReserveConfiguration for DataTypes.ReserveConfigurationMap;
-    using AuctionConfiguration for DataTypes.ReserveAuctionConfigurationMap;
     using UserConfiguration for DataTypes.UserConfigurationMap;
 
     // Factor to apply to "only-variable-debt" liquidity rate to get threshold for rebalancing, expressed in bps
@@ -66,11 +64,17 @@ library ValidationLogic {
     ) internal view {
         uint256 amount = params.tokenData.length;
         require(amount != 0, Errors.INVALID_AMOUNT);
-        require(reserveCache.assetType == assetType, Errors.INVALID_ASSET_TYPE);
 
-        (bool isActive, bool isFrozen, , , bool isPaused) = reserveCache
-            .reserveConfiguration
-            .getFlags();
+        (
+            bool isActive,
+            bool isFrozen,
+            ,
+            ,
+            bool isPaused,
+            DataTypes.AssetType reserveAssetType
+        ) = reserveCache.reserveConfiguration.getFlags();
+
+        require(reserveAssetType == assetType, Errors.INVALID_ASSET_TYPE);
         require(isActive, Errors.RESERVE_INACTIVE);
         require(!isPaused, Errors.RESERVE_PAUSED);
         require(!isFrozen, Errors.RESERVE_FROZEN);
@@ -128,19 +132,25 @@ library ValidationLogic {
         uint256 userBalance
     ) internal pure {
         require(amount != 0, Errors.INVALID_AMOUNT);
-        require(
-            reserveCache.assetType == DataTypes.AssetType.ERC20,
-            Errors.INVALID_ASSET_TYPE
-        );
 
         require(
             amount <= userBalance,
             Errors.NOT_ENOUGH_AVAILABLE_USER_BALANCE
         );
 
-        (bool isActive, , , , bool isPaused) = reserveCache
-            .reserveConfiguration
-            .getFlags();
+        (
+            bool isActive,
+            ,
+            ,
+            ,
+            bool isPaused,
+            DataTypes.AssetType reserveAssetType
+        ) = reserveCache.reserveConfiguration.getFlags();
+
+        require(
+            reserveAssetType == DataTypes.AssetType.ERC20,
+            Errors.INVALID_ASSET_TYPE
+        );
         require(isActive, Errors.RESERVE_INACTIVE);
         require(!isPaused, Errors.RESERVE_PAUSED);
     }
@@ -149,13 +159,19 @@ library ValidationLogic {
         internal
         pure
     {
+        (
+            bool isActive,
+            ,
+            ,
+            ,
+            bool isPaused,
+            DataTypes.AssetType reserveAssetType
+        ) = reserveCache.reserveConfiguration.getFlags();
+
         require(
-            reserveCache.assetType == DataTypes.AssetType.ERC721,
+            reserveAssetType == DataTypes.AssetType.ERC721,
             Errors.INVALID_ASSET_TYPE
         );
-        (bool isActive, , , , bool isPaused) = reserveCache
-            .reserveConfiguration
-            .getFlags();
         require(isActive, Errors.RESERVE_INACTIVE);
         require(!isPaused, Errors.RESERVE_PAUSED);
     }
@@ -180,6 +196,7 @@ library ValidationLogic {
         bool borrowingEnabled;
         bool stableRateBorrowingEnabled;
         bool siloedBorrowingEnabled;
+        DataTypes.AssetType assetType;
     }
 
     /**
@@ -194,10 +211,6 @@ library ValidationLogic {
         DataTypes.ValidateBorrowParams memory params
     ) internal view {
         require(params.amount != 0, Errors.INVALID_AMOUNT);
-        require(
-            params.assetType == DataTypes.AssetType.ERC20,
-            Errors.INVALID_ASSET_TYPE
-        );
         ValidateBorrowLocalVars memory vars;
 
         (
@@ -205,9 +218,14 @@ library ValidationLogic {
             vars.isFrozen,
             vars.borrowingEnabled,
             vars.stableRateBorrowingEnabled,
-            vars.isPaused
+            vars.isPaused,
+            vars.assetType
         ) = params.reserveCache.reserveConfiguration.getFlags();
 
+        require(
+            vars.assetType == DataTypes.AssetType.ERC20,
+            Errors.INVALID_ASSET_TYPE
+        );
         require(vars.isActive, Errors.RESERVE_INACTIVE);
         require(!vars.isPaused, Errors.RESERVE_PAUSED);
         require(!vars.isFrozen, Errors.RESERVE_FROZEN);
@@ -376,7 +394,7 @@ library ValidationLogic {
             Errors.NO_EXPLICIT_AMOUNT_TO_REPAY_ON_BEHALF
         );
 
-        (bool isActive, , , , bool isPaused) = reserveCache
+        (bool isActive, , , , bool isPaused, ) = reserveCache
             .reserveConfiguration
             .getFlags();
         require(isActive, Errors.RESERVE_INACTIVE);
@@ -430,7 +448,8 @@ library ValidationLogic {
             bool isFrozen,
             ,
             bool stableRateEnabled,
-            bool isPaused
+            bool isPaused,
+
         ) = reserveCache.reserveConfiguration.getFlags();
         require(isActive, Errors.RESERVE_INACTIVE);
         require(!isPaused, Errors.RESERVE_PAUSED);
@@ -474,7 +493,7 @@ library ValidationLogic {
         DataTypes.ReserveCache memory reserveCache,
         address reserveAddress
     ) internal view {
-        (bool isActive, , , , bool isPaused) = reserveCache
+        (bool isActive, , , , bool isPaused, ) = reserveCache
             .reserveConfiguration
             .getFlags();
         require(isActive, Errors.RESERVE_INACTIVE);
@@ -516,19 +535,25 @@ library ValidationLogic {
      * @param reserveCache The cached data of the reserve
      * @param userBalance The balance of the user
      */
-    function validateSetUseReserveAsCollateral(
+    function validateSetUseERC20AsCollateral(
         DataTypes.ReserveCache memory reserveCache,
         uint256 userBalance
     ) internal pure {
-        require(
-            reserveCache.assetType == DataTypes.AssetType.ERC20,
-            Errors.INVALID_ASSET_TYPE
-        );
         require(userBalance != 0, Errors.UNDERLYING_BALANCE_ZERO);
 
-        (bool isActive, , , , bool isPaused) = reserveCache
-            .reserveConfiguration
-            .getFlags();
+        (
+            bool isActive,
+            ,
+            ,
+            ,
+            bool isPaused,
+            DataTypes.AssetType reserveAssetType
+        ) = reserveCache.reserveConfiguration.getFlags();
+
+        require(
+            reserveAssetType == DataTypes.AssetType.ERC20,
+            Errors.INVALID_ASSET_TYPE
+        );
         require(isActive, Errors.RESERVE_INACTIVE);
         require(!isPaused, Errors.RESERVE_PAUSED);
     }
@@ -536,13 +561,19 @@ library ValidationLogic {
     function validateSetUseERC721AsCollateral(
         DataTypes.ReserveCache memory reserveCache
     ) internal pure {
+        (
+            bool isActive,
+            ,
+            ,
+            ,
+            bool isPaused,
+            DataTypes.AssetType reserveAssetType
+        ) = reserveCache.reserveConfiguration.getFlags();
+
         require(
-            reserveCache.assetType == DataTypes.AssetType.ERC721,
+            reserveAssetType == DataTypes.AssetType.ERC721,
             Errors.INVALID_ASSET_TYPE
         );
-        (bool isActive, , , , bool isPaused) = reserveCache
-            .reserveConfiguration
-            .getFlags();
         require(isActive, Errors.RESERVE_INACTIVE);
         require(!isPaused, Errors.RESERVE_PAUSED);
     }
@@ -553,12 +584,14 @@ library ValidationLogic {
         bool principalReserveActive;
         bool principalReservePaused;
         bool isCollateralEnabled;
+        DataTypes.AssetType collateralReserveAssetType;
     }
 
     struct ValidateAuctionLocalVars {
         bool collateralReserveActive;
         bool collateralReservePaused;
         bool isCollateralEnabled;
+        DataTypes.AssetType collateralReserveAssetType;
     }
 
     /**
@@ -572,10 +605,6 @@ library ValidationLogic {
         DataTypes.ReserveData storage collateralReserve,
         DataTypes.ValidateLiquidationCallParams memory params
     ) internal view {
-        require(
-            params.assetType == DataTypes.AssetType.ERC20,
-            Errors.INVALID_ASSET_TYPE
-        );
         ValidateLiquidationCallLocalVars memory vars;
 
         (
@@ -583,15 +612,22 @@ library ValidationLogic {
             ,
             ,
             ,
-            vars.collateralReservePaused
+            vars.collateralReservePaused,
+            vars.collateralReserveAssetType
         ) = collateralReserve.configuration.getFlags();
+
+        require(
+            vars.collateralReserveAssetType == DataTypes.AssetType.ERC20,
+            Errors.INVALID_ASSET_TYPE
+        );
 
         (
             vars.principalReserveActive,
             ,
             ,
             ,
-            vars.principalReservePaused
+            vars.principalReservePaused,
+
         ) = params.debtReserveCache.reserveConfiguration.getFlags();
 
         require(
@@ -644,11 +680,6 @@ library ValidationLogic {
         DataTypes.ValidateERC721LiquidationCallParams memory params
     ) internal view {
         require(
-            params.assetType == DataTypes.AssetType.ERC721,
-            Errors.INVALID_ASSET_TYPE
-        );
-
-        require(
             params.liquidator != params.borrower,
             Errors.LIQUIDATOR_CAN_NOT_BE_SELF
         );
@@ -660,15 +691,22 @@ library ValidationLogic {
             ,
             ,
             ,
-            vars.collateralReservePaused
+            vars.collateralReservePaused,
+            vars.collateralReserveAssetType
         ) = collateralReserve.configuration.getFlags();
+
+        require(
+            vars.collateralReserveAssetType == DataTypes.AssetType.ERC721,
+            Errors.INVALID_ASSET_TYPE
+        );
 
         (
             vars.principalReserveActive,
             ,
             ,
             ,
-            vars.principalReservePaused
+            vars.principalReservePaused,
+
         ) = params.debtReserveCache.reserveConfiguration.getFlags();
 
         require(
@@ -689,17 +727,14 @@ library ValidationLogic {
             Errors.PRICE_ORACLE_SENTINEL_CHECK_FAILED
         );
 
-        if (!collateralReserve.auctionConfiguration.getAuctionEnabled()) {
+        if (!params.auctionEnabled) {
             require(
                 params.healthFactor < HEALTH_FACTOR_LIQUIDATION_THRESHOLD,
                 Errors.ERC721_HEALTH_FACTOR_NOT_BELOW_THRESHOLD
             );
         } else {
             require(
-                params.healthFactor <
-                    collateralReserve
-                        .auctionConfiguration
-                        .getAuctionRecoveryHealthFactor(),
+                params.healthFactor < params.auctionRecoveryHealthFactor,
                 Errors.ERC721_HEALTH_FACTOR_NOT_BELOW_THRESHOLD
             );
             require(
@@ -785,31 +820,35 @@ library ValidationLogic {
         DataTypes.ReserveData storage collateralReserve,
         DataTypes.ValidateAuctionParams memory params
     ) internal view {
-        require(
-            params.assetType == DataTypes.AssetType.ERC721,
-            Errors.INVALID_ASSET_TYPE
-        );
-        require(
-            IERC721(collateralReserve.xTokenAddress).ownerOf(params.tokenId) ==
-                params.user,
-            Errors.NOT_THE_OWNER
-        );
-
         ValidateAuctionLocalVars memory vars;
 
+        DataTypes.ReserveConfigurationMap
+            memory collateralConfiguration = collateralReserve.configuration;
         (
             vars.collateralReserveActive,
             ,
             ,
             ,
-            vars.collateralReservePaused
-        ) = collateralReserve.configuration.getFlags();
+            vars.collateralReservePaused,
+            vars.collateralReserveAssetType
+        ) = collateralConfiguration.getFlags();
+
+        require(
+            vars.collateralReserveAssetType == DataTypes.AssetType.ERC721,
+            Errors.INVALID_ASSET_TYPE
+        );
+
+        require(
+            IERC721(params.xTokenAddress).ownerOf(params.tokenId) ==
+                params.user,
+            Errors.NOT_THE_OWNER
+        );
 
         require(vars.collateralReserveActive, Errors.RESERVE_INACTIVE);
         require(!vars.collateralReservePaused, Errors.RESERVE_PAUSED);
 
         require(
-            collateralReserve.auctionConfiguration.getAuctionEnabled(),
+            collateralReserve.auctionStrategyAddress != address(0),
             Errors.AUCTION_NOT_ENABLED
         );
         require(
@@ -820,12 +859,12 @@ library ValidationLogic {
         );
 
         require(
-            params.healthFactor < HEALTH_FACTOR_LIQUIDATION_THRESHOLD,
+            params.erc721HealthFactor < HEALTH_FACTOR_LIQUIDATION_THRESHOLD,
             Errors.ERC721_HEALTH_FACTOR_NOT_BELOW_THRESHOLD
         );
 
         vars.isCollateralEnabled =
-            collateralReserve.configuration.getLiquidationThreshold() != 0 &&
+            collateralConfiguration.getLiquidationThreshold() != 0 &&
             userConfig.isUsingAsCollateral(collateralReserve.id) &&
             ICollaterizableERC721(params.xTokenAddress).isUsedAsCollateral(
                 params.tokenId
@@ -839,20 +878,9 @@ library ValidationLogic {
     }
 
     function validateEndAuction(
-        DataTypes.UserConfigurationMap storage userConfig,
         DataTypes.ReserveData storage collateralReserve,
         DataTypes.ValidateAuctionParams memory params
     ) internal view {
-        require(
-            params.assetType == DataTypes.AssetType.ERC721,
-            Errors.INVALID_ASSET_TYPE
-        );
-        require(
-            IERC721(collateralReserve.xTokenAddress).ownerOf(params.tokenId) ==
-                params.user,
-            Errors.NOT_THE_OWNER
-        );
-
         ValidateAuctionLocalVars memory vars;
 
         (
@@ -860,16 +888,21 @@ library ValidationLogic {
             ,
             ,
             ,
-            vars.collateralReservePaused
+            vars.collateralReservePaused,
+            vars.collateralReserveAssetType
         ) = collateralReserve.configuration.getFlags();
 
+        require(
+            vars.collateralReserveAssetType == DataTypes.AssetType.ERC721,
+            Errors.INVALID_ASSET_TYPE
+        );
+        require(
+            IERC721(params.xTokenAddress).ownerOf(params.tokenId) ==
+                params.user,
+            Errors.NOT_THE_OWNER
+        );
         require(vars.collateralReserveActive, Errors.RESERVE_INACTIVE);
         require(!vars.collateralReservePaused, Errors.RESERVE_PAUSED);
-
-        require(
-            collateralReserve.auctionConfiguration.getAuctionEnabled(),
-            Errors.AUCTION_NOT_ENABLED
-        );
         require(
             IAuctionableERC721(params.xTokenAddress).isAuctioned(
                 params.tokenId
@@ -877,13 +910,8 @@ library ValidationLogic {
             Errors.AUCTION_NOT_STARTED
         );
 
-        uint256 recoveryHealthFactor = collateralReserve
-            .auctionConfiguration
-            .getAuctionRecoveryHealthFactor();
-
         require(
-            recoveryHealthFactor != 0 &&
-                params.healthFactor >= recoveryHealthFactor,
+            params.erc721HealthFactor > params.auctionRecoveryHealthFactor,
             Errors.ERC721_HEALTH_FACTOR_NOT_ABOVE_THRESHOLD
         );
     }
@@ -975,7 +1003,7 @@ library ValidationLogic {
         DataTypes.ExecuteFlashClaimParams memory params
     ) internal view {
         require(
-            reserve.assetType == DataTypes.AssetType.ERC721,
+            reserve.configuration.getAssetType() == DataTypes.AssetType.ERC721,
             Errors.INVALID_ASSET_TYPE
         );
         require(
@@ -1009,7 +1037,7 @@ library ValidationLogic {
 
     function validateBuyWithCredit(
         DataTypes.ExecuteMarketplaceParams memory params
-    ) internal view {
+    ) internal pure {
         require(!params.marketplace.paused, Errors.MARKETPLACE_PAUSED);
     }
 

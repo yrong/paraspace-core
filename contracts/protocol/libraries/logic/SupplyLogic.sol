@@ -3,7 +3,6 @@ pragma solidity 0.8.10;
 
 import {IERC20} from "../../../dependencies/openzeppelin/contracts/IERC20.sol";
 import {IERC721} from "../../../dependencies/openzeppelin/contracts/IERC721.sol";
-
 import {GPv2SafeERC20} from "../../../dependencies/gnosis/contracts/GPv2SafeERC20.sol";
 import {IPToken} from "../../../interfaces/IPToken.sol";
 import {INToken} from "../../../interfaces/INToken.sol";
@@ -16,7 +15,6 @@ import {WadRayMath} from "../math/WadRayMath.sol";
 import {PercentageMath} from "../math/PercentageMath.sol";
 import {ValidationLogic} from "./ValidationLogic.sol";
 import {ReserveLogic} from "./ReserveLogic.sol";
-import {AuctionConfiguration} from "../configuration/AuctionConfiguration.sol";
 
 /**
  * @title SupplyLogic library
@@ -25,7 +23,6 @@ import {AuctionConfiguration} from "../configuration/AuctionConfiguration.sol";
  */
 library SupplyLogic {
     using ReserveLogic for DataTypes.ReserveData;
-    using AuctionConfiguration for DataTypes.ReserveAuctionConfigurationMap;
     using GPv2SafeERC20 for IERC20;
     using UserConfiguration for DataTypes.UserConfigurationMap;
     using WadRayMath for uint256;
@@ -57,7 +54,8 @@ library SupplyLogic {
         address user,
         address indexed onBehalfOf,
         DataTypes.ERC721SupplyParams[] tokenData,
-        uint16 indexed referralCode
+        uint16 indexed referralCode,
+        bool fromNToken
     );
 
     event WithdrawERC721(
@@ -129,6 +127,37 @@ library SupplyLogic {
         );
     }
 
+    function executeSupplyERC721Base(
+        uint16 reserveId,
+        address nTokenAddress,
+        DataTypes.UserConfigurationMap storage userConfig,
+        DataTypes.ExecuteSupplyERC721Params memory params
+    ) internal {
+        //currently don't need to update state for erc721
+        //reserve.updateState(reserveCache);
+
+        bool isFirstCollateralized = INToken(nTokenAddress).mint(
+            params.onBehalfOf,
+            params.tokenData
+        );
+        if (isFirstCollateralized) {
+            userConfig.setUsingAsCollateral(reserveId, true);
+            emit ReserveUsedAsCollateralEnabled(
+                params.asset,
+                params.onBehalfOf
+            );
+        }
+    }
+
+    /**
+     * @notice Implements the supplyERC721 feature.
+     * @dev Emits the `SupplyERC721()` event.
+     * @dev In the first supply action, `ReserveUsedAsCollateralEnabled()` is emitted, if the asset can be enabled as
+     * collateral.
+     * @param reservesData The state of all the reserves
+     * @param userConfig The user configuration mapping that tracks the supplied/borrowed assets
+     * @param params The additional parameters needed to execute the supply function
+     */
     function executeSupplyERC721(
         mapping(address => DataTypes.ReserveData) storage reservesData,
         DataTypes.UserConfigurationMap storage userConfig,
@@ -137,48 +166,73 @@ library SupplyLogic {
         DataTypes.ReserveData storage reserve = reservesData[params.asset];
         DataTypes.ReserveCache memory reserveCache = reserve.cache();
 
-        reserve.updateState(reserveCache);
-
-        uint256 amount = params.tokenData.length;
-
         ValidationLogic.validateSupply(
             reserveCache,
-            amount,
+            params.tokenData.length,
             DataTypes.AssetType.ERC721
         );
 
-        if (params.actualSpender == address(0)) {
-            params.actualSpender = msg.sender;
-        }
-
-        for (uint256 index = 0; index < amount; index++) {
-            if (!params.tokenData[index].useNToken) {
-                IERC721(params.asset).safeTransferFrom(
-                    params.actualSpender,
-                    reserveCache.xTokenAddress,
-                    params.tokenData[index].tokenId
-                );
-            }
-        }
-
-        bool isFirstCollaterarized = INToken(reserveCache.xTokenAddress).mint(
-            params.onBehalfOf,
-            params.tokenData
-        );
-        if (isFirstCollaterarized) {
-            userConfig.setUsingAsCollateral(reserve.id, true);
-            emit ReserveUsedAsCollateralEnabled(
-                params.asset,
-                params.onBehalfOf
+        for (uint256 index = 0; index < params.tokenData.length; index++) {
+            IERC721(params.asset).safeTransferFrom(
+                params.actualSpender,
+                reserveCache.xTokenAddress,
+                params.tokenData[index].tokenId
             );
         }
+
+        executeSupplyERC721Base(
+            reserve.id,
+            reserveCache.xTokenAddress,
+            userConfig,
+            params
+        );
 
         emit SupplyERC721(
             params.asset,
             params.actualSpender,
             params.onBehalfOf,
             params.tokenData,
-            params.referralCode
+            params.referralCode,
+            false
+        );
+    }
+
+    /**
+     * @notice Implements the executeSupplyERC721FromNToken feature.
+     * @dev Emits the `SupplyERC721()` event with fromNToken as true.
+     * @dev same as `executeSupplyERC721` whereas no need to transfer the underlying nft
+     * @param reservesData The state of all the reserves
+     * @param userConfig The user configuration mapping that tracks the supplied/borrowed assets
+     * @param params The additional parameters needed to execute the supply function
+     */
+    function executeSupplyERC721FromNToken(
+        mapping(address => DataTypes.ReserveData) storage reservesData,
+        DataTypes.UserConfigurationMap storage userConfig,
+        DataTypes.ExecuteSupplyERC721Params memory params
+    ) external {
+        DataTypes.ReserveData storage reserve = reservesData[params.asset];
+        DataTypes.ReserveCache memory reserveCache = reserve.cache();
+
+        ValidationLogic.validateSupplyFromNToken(
+            reserveCache,
+            params,
+            DataTypes.AssetType.ERC721
+        );
+
+        executeSupplyERC721Base(
+            reserve.id,
+            reserveCache.xTokenAddress,
+            userConfig,
+            params
+        );
+
+        emit SupplyERC721(
+            params.asset,
+            msg.sender,
+            params.onBehalfOf,
+            params.tokenData,
+            params.referralCode,
+            true
         );
     }
 
@@ -270,9 +324,9 @@ library SupplyLogic {
         reserve.updateState(reserveCache);
 
         ValidationLogic.validateWithdrawERC721(reserveCache);
-        uint256 amount = params.tokenIds.length;
+        uint256 amountToWithdraw = params.tokenIds.length;
 
-        bool isLastUncollaterarized = INToken(reserveCache.xTokenAddress).burn(
+        bool isLastUncollateralized = INToken(reserveCache.xTokenAddress).burn(
             msg.sender,
             params.to,
             params.tokenIds
@@ -291,7 +345,7 @@ library SupplyLogic {
                 );
             }
 
-            if (isLastUncollaterarized) {
+            if (isLastUncollateralized) {
                 userConfig.setUsingAsCollateral(reserve.id, false);
                 emit ReserveUsedAsCollateralDisabled(params.asset, msg.sender);
             }
@@ -304,11 +358,11 @@ library SupplyLogic {
             params.tokenIds
         );
 
-        return amount;
+        return amountToWithdraw;
     }
 
     /**
-     * @notice Validates a transfer of xTokens. The sender is subjected to health factor validation to avoid
+     * @notice Validates a transfer of PTokens. The sender is subjected to health factor validation to avoid
      * collateralization constraints violation.
      * @dev Emits the `ReserveUsedAsCollateralEnabled()` event for the `to` account, if the asset is being activated as
      * collateral.
@@ -318,7 +372,7 @@ library SupplyLogic {
      * @param usersConfig The users configuration mapping that track the supplied/borrowed assets
      * @param params The additional parameters needed to execute the finalizeTransfer function
      */
-    function executeFinalizeTransfer(
+    function executeFinalizeTransferERC20(
         mapping(address => DataTypes.ReserveData) storage reservesData,
         mapping(uint256 => address) storage reservesList,
         mapping(address => DataTypes.UserConfigurationMap) storage usersConfig,
@@ -330,23 +384,12 @@ library SupplyLogic {
 
         uint256 reserveId = reserve.id;
 
-        if (params.from != params.to && params.value != 0) {
+        if (params.from != params.to && params.amount != 0) {
             DataTypes.UserConfigurationMap storage fromConfig = usersConfig[
                 params.from
             ];
 
-            bool usingAsCollateral;
-            uint256 amount;
-
-            if (reserve.assetType == DataTypes.AssetType.ERC721) {
-                usingAsCollateral = params.usedAsCollateral;
-                amount = 1;
-            } else {
-                usingAsCollateral = fromConfig.isUsingAsCollateral(reserveId);
-                amount = params.value;
-            }
-
-            if (usingAsCollateral) {
+            if (fromConfig.isUsingAsCollateral(reserveId)) {
                 if (fromConfig.isBorrowingAny()) {
                     ValidationLogic.validateHFAndLtv(
                         reservesData,
@@ -359,7 +402,7 @@ library SupplyLogic {
                     );
                 }
 
-                if (params.balanceFromBefore == amount) {
+                if (params.balanceFromBefore == params.amount) {
                     fromConfig.setUsingAsCollateral(reserveId, false);
                     emit ReserveUsedAsCollateralDisabled(
                         params.asset,
@@ -382,6 +425,56 @@ library SupplyLogic {
     }
 
     /**
+     * @notice Validates a transfer of NTokens. The sender is subjected to health factor validation to avoid
+     * collateralization constraints violation.
+     * @dev In case the `from` user transfers everything, `ReserveUsedAsCollateralDisabled()` is emitted for `from`.
+     * @param reservesData The state of all the reserves
+     * @param reservesList The addresses of all the active reserves
+     * @param usersConfig The users configuration mapping that track the supplied/borrowed assets
+     * @param params The additional parameters needed to execute the finalizeTransfer function
+     */
+    function executeFinalizeTransferERC721(
+        mapping(address => DataTypes.ReserveData) storage reservesData,
+        mapping(uint256 => address) storage reservesList,
+        mapping(address => DataTypes.UserConfigurationMap) storage usersConfig,
+        DataTypes.FinalizeTransferParams memory params
+    ) external {
+        DataTypes.ReserveData storage reserve = reservesData[params.asset];
+
+        ValidationLogic.validateTransfer(reserve);
+
+        uint256 reserveId = reserve.id;
+
+        if (params.from != params.to) {
+            DataTypes.UserConfigurationMap storage fromConfig = usersConfig[
+                params.from
+            ];
+
+            if (params.usedAsCollateral) {
+                if (fromConfig.isBorrowingAny()) {
+                    ValidationLogic.validateHFAndLtv(
+                        reservesData,
+                        reservesList,
+                        usersConfig[params.from],
+                        params.asset,
+                        params.from,
+                        params.reservesCount,
+                        params.oracle
+                    );
+                }
+
+                if (params.balanceFromBefore == 1) {
+                    fromConfig.setUsingAsCollateral(reserveId, false);
+                    emit ReserveUsedAsCollateralDisabled(
+                        params.asset,
+                        params.from
+                    );
+                }
+            }
+        }
+    }
+
+    /**
      * @notice Executes the 'set as collateral' feature. A user can choose to activate or deactivate an asset as
      * collateral at any point in time. Deactivating an asset as collateral is subjected to the usual health factor
      * checks to ensure collateralization.
@@ -395,7 +488,7 @@ library SupplyLogic {
      * @param reservesCount The number of initialized reserves
      * @param priceOracle The address of the price oracle
      */
-    function executeUseReserveAsCollateral(
+    function executeUseERC20AsCollateral(
         mapping(address => DataTypes.ReserveData) storage reservesData,
         mapping(uint256 => address) storage reservesList,
         DataTypes.UserConfigurationMap storage userConfig,
@@ -411,7 +504,7 @@ library SupplyLogic {
             msg.sender
         );
 
-        ValidationLogic.validateSetUseReserveAsCollateral(
+        ValidationLogic.validateSetUseERC20AsCollateral(
             reserveCache,
             userBalance
         );
@@ -439,26 +532,60 @@ library SupplyLogic {
     }
 
     /**
-     * @notice Executes the 'set as collateral' feature. A user can choose to activate or deactivate an asset as
+     * @notice Executes the 'set as collateral' feature. A user can choose to activate an asset as
+     * collateral at any point in time.
+     * @dev Emits the `ReserveUsedAsCollateralEnabled()` event if the asset can be activated as collateral.
+     * @param reservesData The state of all the reserves
+     * @param userConfig The users configuration mapping that track the supplied/borrowed assets
+     * @param asset The address of the asset being configured as collateral
+     * @param tokenIds The ids of the supplied ERC721 token
+     * @param sender The address of NFT owner
+     */
+    function executeCollateralizeERC721(
+        mapping(address => DataTypes.ReserveData) storage reservesData,
+        DataTypes.UserConfigurationMap storage userConfig,
+        address asset,
+        uint256[] calldata tokenIds,
+        address sender
+    ) external {
+        DataTypes.ReserveData storage reserve = reservesData[asset];
+        DataTypes.ReserveCache memory reserveCache = reserve.cache();
+
+        ValidationLogic.validateSetUseERC721AsCollateral(reserveCache);
+
+        (
+            uint256 oldCollaterizedBalance,
+            uint256 newCollaterizedBalance
+        ) = ICollaterizableERC721(reserveCache.xTokenAddress)
+                .batchSetIsUsedAsCollateral(tokenIds, true, sender);
+
+        if (oldCollaterizedBalance == 0 && newCollaterizedBalance != 0) {
+            userConfig.setUsingAsCollateral(reserve.id, true);
+            emit ReserveUsedAsCollateralEnabled(asset, sender);
+        }
+    }
+
+    /**
+     * @notice Executes the 'set as collateral' feature. A user can choose to deactivate an asset as
      * collateral at any point in time. Deactivating an asset as collateral is subjected to the usual health factor
      * checks to ensure collateralization.
-     * @dev Emits the `ReserveUsedAsCollateralEnabled()` event if the asset can be activated as collateral.
-     * @dev In case the asset is being deactivated as collateral, `ReserveUsedAsCollateralDisabled()` is emitted.
+     * @dev Emits the `ReserveUsedAsCollateralDisabled()` event if the asset can be deactivated as collateral.
      * @param reservesData The state of all the reserves
      * @param reservesList The addresses of all the active reserves
      * @param userConfig The users configuration mapping that track the supplied/borrowed assets
      * @param asset The address of the asset being configured as collateral
-     * @param useAsCollateral True if the user wants to set the asset as collateral, false otherwise
+     * @param tokenIds The ids of the supplied ERC721 token
+     * @param sender The address of NFT owner
      * @param reservesCount The number of initialized reserves
      * @param priceOracle The address of the price oracle
      */
-    function executeUseERC721AsCollateral(
+    function executeUncollateralizeERC721(
         mapping(address => DataTypes.ReserveData) storage reservesData,
         mapping(uint256 => address) storage reservesList,
         DataTypes.UserConfigurationMap storage userConfig,
         address asset,
         uint256[] calldata tokenIds,
-        bool useAsCollateral,
+        address sender,
         uint256 reservesCount,
         address priceOracle
     ) external {
@@ -467,36 +594,28 @@ library SupplyLogic {
 
         ValidationLogic.validateSetUseERC721AsCollateral(reserveCache);
 
-        address sender = msg.sender;
         (
             uint256 oldCollaterizedBalance,
             uint256 newCollaterizedBalance
         ) = ICollaterizableERC721(reserveCache.xTokenAddress)
-                .batchSetIsUsedAsCollateral(tokenIds, useAsCollateral, sender);
+                .batchSetIsUsedAsCollateral(tokenIds, false, sender);
 
         if (oldCollaterizedBalance == newCollaterizedBalance) {
             return;
         }
 
-        if (useAsCollateral) {
-            if (oldCollaterizedBalance == 0) {
-                userConfig.setUsingAsCollateral(reserve.id, true);
-                emit ReserveUsedAsCollateralEnabled(asset, sender);
-            }
-        } else {
-            if (newCollaterizedBalance == 0) {
-                userConfig.setUsingAsCollateral(reserve.id, false);
-                emit ReserveUsedAsCollateralDisabled(asset, sender);
-            }
-            ValidationLogic.validateHFAndLtv(
-                reservesData,
-                reservesList,
-                userConfig,
-                asset,
-                sender,
-                reservesCount,
-                priceOracle
-            );
+        if (newCollaterizedBalance == 0) {
+            userConfig.setUsingAsCollateral(reserve.id, false);
+            emit ReserveUsedAsCollateralDisabled(asset, sender);
         }
+        ValidationLogic.validateHFAndLtv(
+            reservesData,
+            reservesList,
+            userConfig,
+            asset,
+            sender,
+            reservesCount,
+            priceOracle
+        );
     }
 }

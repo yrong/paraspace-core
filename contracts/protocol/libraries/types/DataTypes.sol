@@ -13,8 +13,6 @@ library DataTypes {
     struct ReserveData {
         //stores the reserve configuration
         ReserveConfigurationMap configuration;
-        // //stores the reserve auction configuration
-        ReserveAuctionConfigurationMap auctionConfiguration;
         //the liquidity index. Expressed in ray
         uint128 liquidityIndex;
         //the current supply rate. Expressed in ray
@@ -29,8 +27,6 @@ library DataTypes {
         uint40 lastUpdateTimestamp;
         //the id of the reserve. Represents the position in the list of the active reserves
         uint16 id;
-        // the asset type of the reserve (uint8)
-        AssetType assetType;
         //xToken address
         address xTokenAddress;
         //stableDebtToken address
@@ -81,13 +77,8 @@ library DataTypes {
         // counter for atomic erc721 tokens.
         // this is used to limit the total number of atomic erc721 the user can supply
         uint24 userAtomicTokens;
-    }
-
-    struct ReserveAuctionConfigurationMap {
-        /**
-         * @dev Bitmap of the auction configuration.
-         */
-        uint256 data;
+        // auction validity time for closing invalid auctions in one tx.
+        uint256 auctionValidityTime;
     }
 
     struct ERC721SupplyParams {
@@ -109,7 +100,6 @@ library DataTypes {
     }
 
     struct ReserveCache {
-        AssetType assetType;
         uint256 currScaledVariableDebt;
         uint256 nextScaledVariableDebt;
         uint256 currPrincipalStableDebt;
@@ -125,7 +115,6 @@ library DataTypes {
         uint256 currVariableBorrowRate;
         uint256 reserveFactor;
         ReserveConfigurationMap reserveConfiguration;
-        ReserveAuctionConfigurationMap reserveAuctionConfiguration;
         address xTokenAddress;
         address stableDebtTokenAddress;
         address variableDebtTokenAddress;
@@ -137,6 +126,7 @@ library DataTypes {
         uint256 reservesCount;
         uint256 liquidationAmount;
         uint256 collateralTokenId;
+        uint256 auctionRecoveryHealthFactor;
         address collateralAsset;
         address liquidationAsset;
         address user;
@@ -147,6 +137,7 @@ library DataTypes {
 
     struct ExecuteAuctionParams {
         uint256 reservesCount;
+        uint256 auctionRecoveryHealthFactor;
         uint256 collateralTokenId;
         address collateralAsset;
         address user;
@@ -211,7 +202,7 @@ library DataTypes {
         address from;
         address to;
         bool usedAsCollateral;
-        uint256 value;
+        uint256 amount;
         uint256 balanceFromBefore;
         uint256 balanceToBefore;
         uint256 reservesCount;
@@ -236,7 +227,6 @@ library DataTypes {
         uint256 reservesCount;
         address oracle;
         address priceOracleSentinel;
-        AssetType assetType;
     }
 
     struct ValidateLiquidationCallParams {
@@ -244,7 +234,6 @@ library DataTypes {
         uint256 totalDebt;
         uint256 healthFactor;
         address priceOracleSentinel;
-        AssetType assetType;
     }
 
     struct ValidateERC721LiquidationCallParams {
@@ -256,18 +245,19 @@ library DataTypes {
         uint256 tokenId;
         uint256 collateralDiscountedPrice;
         uint256 liquidationAmount;
+        uint256 auctionRecoveryHealthFactor;
         address priceOracleSentinel;
         address xTokenAddress;
-        AssetType assetType;
+        bool auctionEnabled;
     }
 
     struct ValidateAuctionParams {
         address user;
-        uint256 healthFactor;
+        uint256 auctionRecoveryHealthFactor;
+        uint256 erc721HealthFactor;
         address collateralAsset;
         uint256 tokenId;
         address xTokenAddress;
-        AssetType assetType;
     }
 
     struct CalculateInterestRatesParams {
@@ -283,7 +273,6 @@ library DataTypes {
 
     struct InitReserveParams {
         address asset;
-        AssetType assetType;
         address xTokenAddress;
         address stableDebtAddress;
         address variableDebtAddress;
@@ -316,7 +305,7 @@ library DataTypes {
         uint256 ethLeft;
         DataTypes.Marketplace marketplace;
         OrderInfo orderInfo;
-        address WETH;
+        address weth;
         uint16 referralCode;
         uint256 maxStableRateBorrowSizePercent;
         uint256 reservesCount;

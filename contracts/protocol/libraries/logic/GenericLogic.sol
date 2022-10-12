@@ -30,7 +30,7 @@ library GenericLogic {
     struct CalculateUserAccountDataVars {
         uint256 assetPrice;
         uint256 assetUnit;
-        DataTypes.AssetType assetType;
+        DataTypes.ReserveConfigurationMap reserveConfiguration;
         uint256 userBalanceInBaseCurrency;
         uint256 decimals;
         uint256 ltv;
@@ -49,7 +49,7 @@ library GenericLogic {
         address currentReserveAddress;
         bool hasZeroLtvCollateral;
         bool dynamicConfigs;
-        bool isAutomicPrice;
+        bool isAtomicPrice;
         uint256 dynamicLTV;
         uint256 dynamicLiquidationThreshold;
         address xTokenAddress;
@@ -128,14 +128,15 @@ library GenericLogic {
                 vars.currentReserveAddress
             ];
 
-            vars.assetType = currentReserve.assetType;
+            vars.reserveConfiguration = currentReserve.configuration;
 
             (
                 vars.ltv,
                 vars.liquidationThreshold,
                 vars.liquidationBonus,
                 vars.decimals,
-
+                ,
+                vars.dynamicConfigs
             ) = currentReserve.configuration.getParams();
 
             unchecked {
@@ -144,11 +145,10 @@ library GenericLogic {
 
             vars.xTokenAddress = currentReserve.xTokenAddress;
 
-            vars.dynamicConfigs =
-                vars.assetType != DataTypes.AssetType.ERC20 &&
-                currentReserve.dynamicConfigsStrategyAddress != address(0);
-
-            if (vars.assetType == DataTypes.AssetType.ERC20) {
+            if (
+                vars.reserveConfiguration.getAssetType() ==
+                DataTypes.AssetType.ERC20
+            ) {
                 vars.assetPrice = _getAssetPrice(
                     params.oracle,
                     vars.currentReserveAddress
@@ -198,7 +198,7 @@ library GenericLogic {
                     (vars.liquidationThreshold != 0 || vars.dynamicConfigs) &&
                     params.userConfig.isUsingAsCollateral(vars.i)
                 ) {
-                    vars.isAutomicPrice = INToken(vars.xTokenAddress)
+                    vars.isAtomicPrice = INToken(vars.xTokenAddress)
                         .getAtomicPricingConfig();
                     if (vars.dynamicConfigs) {
                         (
@@ -227,6 +227,10 @@ library GenericLogic {
                         vars.avgLtv +=
                             vars.userBalanceInBaseCurrency *
                             vars.ltv;
+
+                        if (vars.ltv == 0) {
+                            vars.hasZeroLtvCollateral = true;
+                        }
                     }
 
                     vars.avgERC721LiquidationThreshold += vars
@@ -236,12 +240,6 @@ library GenericLogic {
 
                     vars.totalCollateralInBaseCurrency += vars
                         .userBalanceInBaseCurrency;
-
-                    if (vars.ltv == 0) {
-                        if (vars.dynamicLTV == 0) {
-                            vars.hasZeroLtvCollateral = true;
-                        }
-                    }
 
                     vars.avgLiquidationThreshold += vars.liquidationThreshold;
                 }
@@ -368,15 +366,13 @@ library GenericLogic {
      * @notice Calculates total xToken balance of the user in the based currency used by the price oracle
      * @dev For gas reasons, the xToken balance is calculated by fetching `scaledBalancesOf` normalized debt, which
      * is cheaper than fetching `balanceOf`
-     * @return The total xToken balance of the user normalized to the base currency of the price oracle
+     * @return totalValue The total xToken balance of the user normalized to the base currency of the price oracle
      **/
     function _getUserBalanceForERC721(
         DataTypes.CalculateUserAccountDataParams memory params,
         CalculateUserAccountDataVars memory vars
-    ) private view returns (uint256) {
-        uint256 totalValue;
-        if (vars.isAutomicPrice) {
-            uint256 assetPrice;
+    ) private view returns (uint256 totalValue) {
+        if (vars.isAtomicPrice) {
             uint256 totalBalance = INToken(vars.xTokenAddress).balanceOf(
                 params.user
             );
@@ -388,10 +384,11 @@ library GenericLogic {
                     ICollaterizableERC721(vars.xTokenAddress)
                         .isUsedAsCollateral(tokenId)
                 ) {
-                    // TODO use getTokensPrices instead if it saves gas
-                    assetPrice = IPriceOracleGetter(params.oracle)
-                        .getTokenPrice(vars.currentReserveAddress, tokenId);
-                    totalValue += assetPrice;
+                    totalValue += _getTokenPrice(
+                        params.oracle,
+                        vars.currentReserveAddress,
+                        tokenId
+                    );
                 }
             }
         } else {
@@ -405,8 +402,6 @@ library GenericLogic {
                 ) *
                 assetPrice;
         }
-
-        return totalValue;
     }
 
     function _getUserBalanceForDynamicConfigsAsset(
@@ -417,18 +412,15 @@ library GenericLogic {
         private
         view
         returns (
-            uint256,
-            uint256,
-            uint256
+            uint256 totalValue,
+            uint256 totalLTV,
+            uint256 totalLiquidationThreshold
         )
     {
-        uint256 totalValue;
-        uint256 totalLTV;
-        uint256 totalLiquidationThreshold;
         uint256 totalBalance = INToken(vars.xTokenAddress).balanceOf(
             params.user
         );
-        if (vars.isAutomicPrice) {
+        if (vars.isAtomicPrice) {
             for (uint256 index = 0; index < totalBalance; index++) {
                 uint256 tokenId = IERC721Enumerable(vars.xTokenAddress)
                     .tokenOfOwnerByIndex(params.user, index);
@@ -436,21 +428,27 @@ library GenericLogic {
                     ICollaterizableERC721(vars.xTokenAddress)
                         .isUsedAsCollateral(tokenId)
                 ) {
-                    uint256 assetPrice = IPriceOracleGetter(params.oracle)
-                        .getTokenPrice(vars.currentReserveAddress, tokenId);
-                    totalValue += assetPrice;
+                    uint256 tokenPrice = _getTokenPrice(
+                        params.oracle,
+                        vars.currentReserveAddress,
+                        tokenId
+                    );
+                    totalValue += tokenPrice;
 
                     (
                         uint256 tmpLTV,
-                        uint256 tmpLiquidationThreshold,
-
+                        uint256 tmpLiquidationThreshold
                     ) = IDynamicConfigsStrategy(dynamicConfigsStrategyAddress)
                             .getConfigParams(tokenId);
 
-                    totalLTV += tmpLTV * assetPrice;
+                    if (tmpLTV == 0) {
+                        vars.hasZeroLtvCollateral = true;
+                    }
+
+                    totalLTV += tmpLTV * tokenPrice;
                     totalLiquidationThreshold +=
                         tmpLiquidationThreshold *
-                        assetPrice;
+                        tokenPrice;
                 }
             }
         } else {
@@ -472,10 +470,13 @@ library GenericLogic {
                 ) {
                     (
                         uint256 tmpLTV,
-                        uint256 tmpLiquidationThreshold,
-
+                        uint256 tmpLiquidationThreshold
                     ) = IDynamicConfigsStrategy(dynamicConfigsStrategyAddress)
                             .getConfigParams(tokenId);
+
+                    if (tmpLTV == 0) {
+                        vars.hasZeroLtvCollateral = true;
+                    }
 
                     totalLTV += tmpLTV * assetPrice;
                     totalLiquidationThreshold +=
@@ -483,10 +484,6 @@ library GenericLogic {
                         assetPrice;
                 }
             }
-        }
-
-        unchecked {
-            return (totalValue, totalLTV, totalLiquidationThreshold);
         }
     }
 
@@ -527,5 +524,17 @@ library GenericLogic {
         returns (uint256)
     {
         return IPriceOracleGetter(oracle).getAssetPrice(currentReserveAddress);
+    }
+
+    function _getTokenPrice(
+        address oracle,
+        address currentReserveAddress,
+        uint256 tokenId
+    ) internal view returns (uint256) {
+        return
+            IPriceOracleGetter(oracle).getTokenPrice(
+                currentReserveAddress,
+                tokenId
+            );
     }
 }

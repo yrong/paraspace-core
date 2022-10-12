@@ -27,23 +27,27 @@ import {IAuctionableERC721} from "../../interfaces/IAuctionableERC721.sol";
 import {IReserveAuctionStrategy} from "../../interfaces/IReserveAuctionStrategy.sol";
 
 /**
- * @title Pool contract
+ * @title Pool Parameters contract
  *
  * @notice Main point of interaction with an ParaSpace protocol's market
  * - Users can:
- *   # Supply
- *   # Withdraw
- *   # Borrow
- *   # Repay
- *   # Liquidate positions
+ *   - mintToTreasury
+ *   - setMaxAtomicTokensAllowed
+ *   - ...
  * @dev To be covered by a proxy contract, owned by the PoolAddressesProvider of the specific market
  * @dev All admin functions are callable by the PoolConfigurator contract defined also in the
  *   PoolAddressesProvider
  **/
-contract PoolParameters is PoolStorage, ReentrancyGuard, IPoolParameters {
+contract PoolParameters is
+    VersionedInitializable,
+    ReentrancyGuard,
+    PoolStorage,
+    IPoolParameters
+{
     using ReserveLogic for DataTypes.ReserveData;
 
     IPoolAddressesProvider internal immutable ADDRESSES_PROVIDER;
+    uint256 internal constant POOL_REVISION = 1;
 
     /**
      * @dev Only pool configurator can call functions marked by this modifier.
@@ -85,11 +89,16 @@ contract PoolParameters is PoolStorage, ReentrancyGuard, IPoolParameters {
         ADDRESSES_PROVIDER = provider;
     }
 
+    function getRevision() internal pure virtual override returns (uint256) {
+        return POOL_REVISION;
+    }
+
     /// @inheritdoc IPoolParameters
     function mintToTreasury(address[] calldata assets)
         external
         virtual
         override
+        nonReentrant
     {
         PoolLogic.executeMintToTreasury(_reserves, assets);
     }
@@ -97,7 +106,6 @@ contract PoolParameters is PoolStorage, ReentrancyGuard, IPoolParameters {
     /// @inheritdoc IPoolParameters
     function initReserve(
         address asset,
-        DataTypes.AssetType assetType,
         address xTokenAddress,
         address stableDebtAddress,
         address variableDebtAddress,
@@ -110,7 +118,6 @@ contract PoolParameters is PoolStorage, ReentrancyGuard, IPoolParameters {
                 _reservesList,
                 DataTypes.InitReserveParams({
                     asset: asset,
-                    assetType: assetType,
                     xTokenAddress: xTokenAddress,
                     stableDebtAddress: stableDebtAddress,
                     variableDebtAddress: variableDebtAddress,
@@ -189,19 +196,6 @@ contract PoolParameters is PoolStorage, ReentrancyGuard, IPoolParameters {
     }
 
     /// @inheritdoc IPoolParameters
-    function setAuctionConfiguration(
-        address asset,
-        DataTypes.ReserveAuctionConfigurationMap calldata auctionConfiguration
-    ) external virtual override onlyPoolConfigurator {
-        require(asset != address(0), Errors.ZERO_ADDRESS_NOT_VALID);
-        require(
-            _reserves[asset].id != 0 || _reservesList[0] == asset,
-            Errors.ASSET_NOT_LISTED
-        );
-        _reserves[asset].auctionConfiguration = auctionConfiguration;
-    }
-
-    /// @inheritdoc IPoolParameters
     function rescueTokens(
         DataTypes.AssetType assetType,
         address token,
@@ -253,5 +247,17 @@ contract PoolParameters is PoolStorage, ReentrancyGuard, IPoolParameters {
         require(value != 0, Errors.INVALID_AMOUNT);
 
         _maxAtomicTokensAllowed = value;
+    }
+
+    /// @inheritdoc IPoolParameters
+    function setAuctionRecoveryHealthFactor(uint64 value)
+        external
+        virtual
+        override
+        onlyPoolConfigurator
+    {
+        require(value != 0, Errors.INVALID_AMOUNT);
+
+        _auctionRecoveryHealthFactor = value;
     }
 }

@@ -9,15 +9,6 @@ import {DataTypes} from "../protocol/libraries/types/DataTypes.sol";
  **/
 interface IAuctionableERC721 {
     /**
-     * @dev get the auctioned balance of a specific user
-     */
-    function auctionedBalanceOf(address user)
-        external
-        view
-        virtual
-        returns (uint256);
-
-    /**
      * @dev get the auction configuration of a specific token
      */
     function isAuctioned(uint256 tokenId) external view returns (bool);
@@ -26,13 +17,13 @@ interface IAuctionableERC721 {
      *
      * @dev start auction
      */
-    function startAuction(uint256 tokenId) external virtual;
+    function startAuction(uint256 tokenId) external;
 
     /**
      *
      * @dev end auction
      */
-    function endAuction(uint256 tokenId) external virtual;
+    function endAuction(uint256 tokenId) external;
 
     /**
      *
@@ -41,6 +32,5 @@ interface IAuctionableERC721 {
     function getAuctionData(uint256 tokenId)
         external
         view
-        virtual
         returns (DataTypes.Auction memory);
 }

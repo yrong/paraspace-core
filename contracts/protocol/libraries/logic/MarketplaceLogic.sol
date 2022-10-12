@@ -11,7 +11,7 @@ import {ValidationLogic} from "./ValidationLogic.sol";
 import {SupplyLogic} from "./SupplyLogic.sol";
 import {BorrowLogic} from "./BorrowLogic.sol";
 import {SeaportInterface} from "../../../dependencies/seaport/contracts/interfaces/SeaportInterface.sol";
-import {GPv2SafeERC20} from "../../../dependencies/gnosis/contracts/GPv2SafeERC20.sol";
+import {SafeERC20} from "../../../dependencies/openzeppelin/contracts/SafeERC20.sol";
 import {IERC20} from "../../../dependencies/openzeppelin/contracts/IERC20.sol";
 import {ConsiderationItem, OfferItem} from "../../../dependencies/seaport/contracts/lib/ConsiderationStructs.sol";
 import {ItemType} from "../../../dependencies/seaport/contracts/lib/ConsiderationEnums.sol";
@@ -30,7 +30,7 @@ import {Address} from "../../../dependencies/openzeppelin/contracts/Address.sol"
 library MarketplaceLogic {
     using UserConfiguration for DataTypes.UserConfigurationMap;
     using ReserveConfiguration for DataTypes.ReserveConfigurationMap;
-    using GPv2SafeERC20 for IERC20;
+    using SafeERC20 for IERC20;
 
     event BuyWithCredit(
         bytes32 indexed marketplaceId,
@@ -43,6 +43,13 @@ library MarketplaceLogic {
         DataTypes.OrderInfo orderInfo,
         DataTypes.Credit credit
     );
+
+    struct MarketplaceLocalVars {
+        bool isETH;
+        address xTokenAddress;
+        address creditToken;
+        uint256 creditAmount;
+    }
 
     /**
      * @notice Implements the buyWithCredit feature. BuyWithCredit allows users to buy NFT from various NFT marketplaces
@@ -61,19 +68,13 @@ library MarketplaceLogic {
     ) external returns (uint256) {
         ValidationLogic.validateBuyWithCredit(params);
 
-        _borrowTo(
-            reservesData,
-            reservesList,
-            userConfig,
-            params,
-            address(this)
-        );
+        MarketplaceLocalVars memory vars = _cache(params);
+
+        _borrowTo(reservesData, params, vars, address(this));
 
         (uint256 priceEth, uint256 downpaymentEth) = _delegateToPool(
-            reservesData,
-            reservesList,
-            userConfig,
-            params
+            params,
+            vars
         );
 
         // delegateCall to avoid extra token transfer
@@ -92,6 +93,7 @@ library MarketplaceLogic {
             reservesList,
             userConfig,
             params,
+            vars,
             params.orderInfo.taker
         );
 
@@ -122,13 +124,9 @@ library MarketplaceLogic {
     ) external {
         ValidationLogic.validateAcceptBidWithCredit(params);
 
-        _borrowTo(
-            reservesData,
-            reservesList,
-            userConfig,
-            params,
-            params.orderInfo.maker
-        );
+        MarketplaceLocalVars memory vars = _cache(params);
+
+        _borrowTo(reservesData, params, vars, params.orderInfo.maker);
 
         // delegateCall to avoid extra token transfer
         Address.functionDelegateCall(
@@ -145,6 +143,7 @@ library MarketplaceLogic {
             reservesList,
             userConfig,
             params,
+            vars,
             params.orderInfo.maker
         );
 
@@ -159,20 +158,13 @@ library MarketplaceLogic {
      * @notice Transfer payNow portion from taker to this contract. This is only useful
      * in buyWithCredit.
      * @dev
-     * @param reservesData The state of all the reserves
-     * @param reservesList The addresses of all the active reserves
-     * @param userConfig The user configuration mapping that tracks the supplied/borrowed assets
      * @param params The additional parameters needed to execute the buyWithCredit/acceptBidWithCredit function
      */
     function _delegateToPool(
-        mapping(address => DataTypes.ReserveData) storage reservesData,
-        mapping(uint256 => address) storage reservesList,
-        DataTypes.UserConfigurationMap storage userConfig,
-        DataTypes.ExecuteMarketplaceParams memory params
+        DataTypes.ExecuteMarketplaceParams memory params,
+        MarketplaceLocalVars memory vars
     ) internal returns (uint256, uint256) {
-        address token = params.credit.token;
         uint256 price = 0;
-        bool isETH = token == address(0);
 
         for (uint256 i = 0; i < params.orderInfo.consideration.length; i++) {
             ConsiderationItem memory item = params.orderInfo.consideration[i];
@@ -182,29 +174,29 @@ library MarketplaceLogic {
             );
             require(
                 item.itemType == ItemType.ERC20 ||
-                    (isETH && item.itemType == ItemType.NATIVE),
+                    (vars.isETH && item.itemType == ItemType.NATIVE),
                 Errors.INVALID_ASSET_TYPE
             );
-            require(item.token == token, Errors.CREDIT_DOES_NOT_MATCH_ORDER);
+            require(
+                item.token == params.credit.token,
+                Errors.CREDIT_DOES_NOT_MATCH_ORDER
+            );
             price += item.startAmount;
         }
 
-        uint256 downpayment = price - params.credit.amount;
-        if (!isETH) {
-            IERC20(token).safeTransferFrom(
-                msg.sender,
+        uint256 downpayment = price - vars.creditAmount;
+        if (!vars.isETH) {
+            IERC20(vars.creditToken).safeTransferFrom(
+                params.orderInfo.taker,
                 address(this),
                 downpayment
             );
-            // reset to be compatible with USDT
-            IERC20(token).approve(params.marketplace.operator, 0);
-            IERC20(token).approve(params.marketplace.operator, price);
+            _checkAllowance(vars.creditToken, params.marketplace.operator);
             // convert to (priceEth, downpaymentEth)
             price = 0;
             downpayment = 0;
         } else {
             require(params.ethLeft >= downpayment, Errors.PAYNOW_NOT_ENOUGH);
-            params.credit.token = params.WETH;
         }
 
         return (price, downpayment);
@@ -215,40 +207,29 @@ library MarketplaceLogic {
      * debt will be minted in the same block to the borrower.
      * @dev
      * @param reservesData The state of all the reserves
-     * @param reservesList The addresses of all the active reserves
-     * @param userConfig The user configuration mapping that tracks the supplied/borrowed assets
      * @param params The additional parameters needed to execute the buyWithCredit/acceptBidWithCredit function
      * @param to The receiver of borrowed tokens
      */
     function _borrowTo(
         mapping(address => DataTypes.ReserveData) storage reservesData,
-        mapping(uint256 => address) storage reservesList,
-        DataTypes.UserConfigurationMap storage userConfig,
         DataTypes.ExecuteMarketplaceParams memory params,
+        MarketplaceLocalVars memory vars,
         address to
     ) internal {
-        if (params.credit.amount == 0) {
+        if (vars.creditAmount == 0) {
             return;
         }
 
-        bool isETH = params.credit.token == address(0);
-        address underlyingAsset = params.credit.token;
-        if (isETH) {
-            underlyingAsset = params.WETH;
-        }
+        DataTypes.ReserveData storage reserve = reservesData[vars.creditToken];
+        vars.xTokenAddress = reserve.xTokenAddress;
 
-        DataTypes.ReserveData storage reserve = reservesData[underlyingAsset];
-
-        require(reserve.xTokenAddress != address(0), Errors.ASSET_NOT_LISTED);
+        require(vars.xTokenAddress != address(0), Errors.ASSET_NOT_LISTED);
         ValidationLogic.validateFlashloanSimple(reserve);
-        IPToken(reserve.xTokenAddress).transferUnderlyingTo(
-            to,
-            params.credit.amount
-        );
+        IPToken(vars.xTokenAddress).transferUnderlyingTo(to, vars.creditAmount);
 
-        if (isETH) {
+        if (vars.isETH) {
             // No re-entrancy because it sent to our contract address
-            IWETH(params.WETH).withdraw(params.credit.amount);
+            IWETH(params.weth).withdraw(vars.creditAmount);
         }
     }
 
@@ -267,6 +248,7 @@ library MarketplaceLogic {
         mapping(uint256 => address) storage reservesList,
         DataTypes.UserConfigurationMap storage userConfig,
         DataTypes.ExecuteMarketplaceParams memory params,
+        MarketplaceLocalVars memory vars,
         address onBehalfOf
     ) internal {
         for (uint256 i = 0; i < params.orderInfo.offer.length; i++) {
@@ -278,22 +260,41 @@ library MarketplaceLogic {
 
             address token = item.token;
             uint256 tokenId = item.identifierOrCriteria;
-            DataTypes.ReserveData memory reserve = reservesData[token];
+            uint256[] memory tokenIds = new uint256[](1);
+            tokenIds[0] = tokenId;
+            vars.xTokenAddress = reservesData[token].xTokenAddress;
 
-            if (reserve.xTokenAddress == address(0)) {
+            // item.token == NToken
+            if (vars.xTokenAddress == address(0)) {
                 address underlyingAsset = INToken(token)
                     .UNDERLYING_ASSET_ADDRESS();
-                reserve = reservesData[underlyingAsset];
-                bool isNToken = reserve.xTokenAddress == token;
-
+                bool isNToken = reservesData[underlyingAsset].xTokenAddress ==
+                    token;
                 require(isNToken, Errors.ASSET_NOT_LISTED);
-                if (!userConfig.isUsingAsCollateral(reserve.id)) {
-                    userConfig.setUsingAsCollateral(reserve.id, true);
-                }
+                SupplyLogic.executeCollateralizeERC721(
+                    reservesData,
+                    userConfig,
+                    underlyingAsset,
+                    tokenIds,
+                    onBehalfOf
+                );
                 // No need to supply anymore because it's already NToken
                 continue;
             }
 
+            // item.token == underlyingAsset but supplied after listing/offering
+            if (INToken(vars.xTokenAddress).ownerOf(tokenId) == onBehalfOf) {
+                SupplyLogic.executeCollateralizeERC721(
+                    reservesData,
+                    userConfig,
+                    token,
+                    tokenIds,
+                    onBehalfOf
+                );
+                continue;
+            }
+
+            // item.token == underlyingAsset and underlyingAsset stays in wallet
             DataTypes.ERC721SupplyParams[]
                 memory tokenData = new DataTypes.ERC721SupplyParams[](1);
             tokenData[0] = DataTypes.ERC721SupplyParams(tokenId, true);
@@ -310,7 +311,7 @@ library MarketplaceLogic {
             );
         }
 
-        if (params.credit.amount == 0) {
+        if (vars.creditAmount == 0) {
             return;
         }
 
@@ -319,10 +320,10 @@ library MarketplaceLogic {
             reservesList,
             userConfig,
             DataTypes.ExecuteBorrowParams({
-                asset: params.credit.token,
+                asset: vars.creditToken,
                 user: onBehalfOf,
                 onBehalfOf: onBehalfOf,
-                amount: params.credit.amount,
+                amount: vars.creditAmount,
                 interestRateMode: DataTypes.InterestRateMode(
                     DataTypes.InterestRateMode.VARIABLE
                 ),
@@ -335,5 +336,33 @@ library MarketplaceLogic {
                 priceOracleSentinel: params.priceOracleSentinel
             })
         );
+    }
+
+    function _checkAllowance(address token, address operator) internal {
+        uint256 allowance = IERC20(token).allowance(address(this), operator);
+        if (allowance == 0) {
+            IERC20(token).safeApprove(operator, type(uint256).max);
+        }
+    }
+
+    function _cache(DataTypes.ExecuteMarketplaceParams memory params)
+        internal
+        pure
+        returns (MarketplaceLocalVars memory vars)
+    {
+        vars.isETH = params.credit.token == address(0);
+        vars.creditToken = vars.isETH ? params.weth : params.credit.token;
+        vars.creditAmount = params.credit.amount;
+    }
+
+    function refundETH(uint256 ethLeft) external {
+        if (ethLeft > 0) {
+            Address.sendValue(payable(msg.sender), ethLeft);
+        }
+    }
+
+    function depositETH(address weth, uint256 ethLeft) external {
+        IWETH(weth).deposit{value: ethLeft}();
+        IERC20(weth).safeTransferFrom(address(this), msg.sender, ethLeft);
     }
 }

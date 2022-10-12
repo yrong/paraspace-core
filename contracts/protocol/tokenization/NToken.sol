@@ -14,7 +14,7 @@ import {WadRayMath} from "../libraries/math/WadRayMath.sol";
 import {IPool} from "../../interfaces/IPool.sol";
 import {INToken} from "../../interfaces/INToken.sol";
 import {IRewardController} from "../../interfaces/IRewardController.sol";
-import {IInitializablePToken} from "../../interfaces/IInitializablePToken.sol";
+import {IInitializableNToken} from "../../interfaces/IInitializableNToken.sol";
 import {ScaledBalanceTokenBaseERC721} from "./base/ScaledBalanceTokenBaseERC721.sol";
 import {IncentivizedERC20} from "./base/IncentivizedERC20.sol";
 import {EIP712Base} from "./base/EIP712Base.sol";
@@ -63,7 +63,6 @@ contract NToken is
         address treasury,
         address underlyingAsset,
         IRewardController incentivesController,
-        uint8 nTokenDecimals,
         string calldata nTokenName,
         string calldata nTokenSymbol,
         bytes calldata params
@@ -93,8 +92,7 @@ contract NToken is
     function mint(
         address onBehalfOf,
         DataTypes.ERC721SupplyParams[] calldata tokenData
-    ) external virtual override onlyPool returns (bool) {
-        // TODO think about using safe mint instead
+    ) external virtual override onlyPool nonReentrant returns (bool) {
         return _mintMultiple(onBehalfOf, tokenData);
     }
 
@@ -103,8 +101,8 @@ contract NToken is
         address from,
         address receiverOfUnderlying,
         uint256[] calldata tokenIds
-    ) external virtual override onlyPool returns (bool) {
-        bool isLastUncollaterarized = _burnMultiple(from, tokenIds);
+    ) external virtual override onlyPool nonReentrant returns (bool) {
+        bool isLastUncollateralized = _burnMultiple(from, tokenIds);
 
         if (receiverOfUnderlying != address(this)) {
             for (uint256 index = 0; index < tokenIds.length; index++) {
@@ -116,7 +114,7 @@ contract NToken is
             }
         }
 
-        return isLastUncollaterarized;
+        return isLastUncollateralized;
     }
 
     /// @inheritdoc INToken
@@ -124,7 +122,7 @@ contract NToken is
         address from,
         address to,
         uint256 value
-    ) external override onlyPool {
+    ) external override onlyPool nonReentrant {
         // Being a normal transfer, the Transfer() and BalanceTransfer() are emitted
         // so no need to emit a specific event here
         _transfer(from, to, value, false);
@@ -237,6 +235,7 @@ contract NToken is
         virtual
         override
         onlyPool
+        nonReentrant
     {
         IERC721(_underlyingAsset).safeTransferFrom(
             address(this),
@@ -251,6 +250,7 @@ contract NToken is
         virtual
         override
         onlyPool
+        nonReentrant
     {
         // Intentionally left blank
     }
@@ -308,17 +308,14 @@ contract NToken is
 
         uint256 fromBalanceBefore = collaterizedBalanceOf(from);
         uint256 toBalanceBefore = collaterizedBalanceOf(to);
-
-        bool isUsedAsCollateral = _isUsedAsCollateral[tokenId];
-        _transferCollaterizable(from, to, tokenId, isUsedAsCollateral);
+        bool isUsedAsCollateral = _transferCollaterizable(from, to, tokenId);
 
         if (validate) {
-            POOL.finalizeTransfer(
+            POOL.finalizeTransferERC721(
                 underlyingAsset,
                 from,
                 to,
                 isUsedAsCollateral,
-                1,
                 fromBalanceBefore,
                 toBalanceBefore
             );

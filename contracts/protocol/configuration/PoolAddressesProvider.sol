@@ -83,6 +83,8 @@ contract PoolAddressesProvider is Ownable, IPoolAddressesProvider {
         override
         onlyOwner
     {
+        require(id != POOL, Errors.INVALID_ADDRESSES_PROVIDER_ID);
+
         address proxyAddress = _addresses[id];
         address oldImplementationAddress = _getProxyImplementation(id);
         _updateImpl(id, newImplementationAddress);
@@ -250,7 +252,7 @@ contract PoolAddressesProvider is Ownable, IPoolAddressesProvider {
             operator,
             paused
         );
-        emit MarketplaceSet(id, marketplace, adapter, operator, paused);
+        emit MarketplaceUpdated(id, marketplace, adapter, operator, paused);
     }
 
     /**

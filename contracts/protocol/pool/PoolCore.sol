@@ -31,57 +31,25 @@ import {IReserveAuctionStrategy} from "../../interfaces/IReserveAuctionStrategy.
  *
  * @notice Main point of interaction with an ParaSpace protocol's market
  * - Users can:
- *   # Supply
- *   # Withdraw
- *   # Borrow
- *   # Repay
- *   # Liquidate positions
+ *   - Supply
+ *   - Withdraw
+ *   - Borrow
+ *   - Repay
+ *   - Liquidate positions
  * @dev To be covered by a proxy contract, owned by the PoolAddressesProvider of the specific market
  * @dev All admin functions are callable by the PoolConfigurator contract defined also in the
  *   PoolAddressesProvider
  **/
 contract PoolCore is
-    PoolStorage,
-    ReentrancyGuard,
     VersionedInitializable,
+    ReentrancyGuard,
+    PoolStorage,
     IPoolCore
 {
     using ReserveLogic for DataTypes.ReserveData;
 
     uint256 public constant POOL_REVISION = 1;
     IPoolAddressesProvider public immutable ADDRESSES_PROVIDER;
-
-    /**
-     * @dev Only pool configurator can call functions marked by this modifier.
-     **/
-    modifier onlyPoolConfigurator() {
-        _onlyPoolConfigurator();
-        _;
-    }
-
-    /**
-     * @dev Only pool admin can call functions marked by this modifier.
-     **/
-    modifier onlyPoolAdmin() {
-        _onlyPoolAdmin();
-        _;
-    }
-
-    function _onlyPoolConfigurator() internal view virtual {
-        require(
-            ADDRESSES_PROVIDER.getPoolConfigurator() == msg.sender,
-            Errors.CALLER_NOT_POOL_CONFIGURATOR
-        );
-    }
-
-    function _onlyPoolAdmin() internal view virtual {
-        require(
-            IACLManager(ADDRESSES_PROVIDER.getACLManager()).isPoolAdmin(
-                msg.sender
-            ),
-            Errors.CALLER_NOT_POOL_ADMIN
-        );
-    }
 
     function getRevision() internal pure virtual override returns (uint256) {
         return POOL_REVISION;
@@ -147,7 +115,7 @@ contract PoolCore is
                 asset: asset,
                 tokenData: tokenData,
                 onBehalfOf: onBehalfOf,
-                actualSpender: address(0),
+                actualSpender: msg.sender,
                 referralCode: referralCode
             })
         );
@@ -280,8 +248,7 @@ contract PoolCore is
         address asset,
         uint256 amount,
         uint256 interestRateMode,
-        address onBehalfOf,
-        bool usePTokens
+        address onBehalfOf
     ) external virtual override nonReentrant returns (uint256) {
         return
             BorrowLogic.executeRepay(
@@ -294,7 +261,29 @@ contract PoolCore is
                         interestRateMode
                     ),
                     onBehalfOf: onBehalfOf,
-                    usePTokens: usePTokens
+                    usePTokens: false
+                })
+            );
+    }
+
+    /// @inheritdoc IPoolCore
+    function repayWithPTokens(
+        address asset,
+        uint256 amount,
+        uint256 interestRateMode
+    ) external virtual override nonReentrant returns (uint256) {
+        return
+            BorrowLogic.executeRepay(
+                _reserves,
+                _usersConfig[msg.sender],
+                DataTypes.ExecuteRepayParams({
+                    asset: asset,
+                    amount: amount,
+                    interestRateMode: DataTypes.InterestRateMode(
+                        interestRateMode
+                    ),
+                    onBehalfOf: msg.sender,
+                    usePTokens: true
                 })
             );
     }
@@ -342,12 +331,13 @@ contract PoolCore is
     }
 
     /// @inheritdoc IPoolCore
-    function setUserUseReserveAsCollateral(address asset, bool useAsCollateral)
+    function setUserUseERC20AsCollateral(address asset, bool useAsCollateral)
         external
         virtual
         override
+        nonReentrant
     {
-        SupplyLogic.executeUseReserveAsCollateral(
+        SupplyLogic.executeUseERC20AsCollateral(
             _reserves,
             _reservesList,
             _usersConfig[msg.sender],
@@ -362,17 +352,27 @@ contract PoolCore is
         address asset,
         uint256[] calldata tokenIds,
         bool useAsCollateral
-    ) external virtual override {
-        SupplyLogic.executeUseERC721AsCollateral(
-            _reserves,
-            _reservesList,
-            _usersConfig[msg.sender],
-            asset,
-            tokenIds,
-            useAsCollateral,
-            _reservesCount,
-            ADDRESSES_PROVIDER.getPriceOracle()
-        );
+    ) external virtual override nonReentrant {
+        if (useAsCollateral) {
+            SupplyLogic.executeCollateralizeERC721(
+                _reserves,
+                _usersConfig[msg.sender],
+                asset,
+                tokenIds,
+                msg.sender
+            );
+        } else {
+            SupplyLogic.executeUncollateralizeERC721(
+                _reserves,
+                _reservesList,
+                _usersConfig[msg.sender],
+                asset,
+                tokenIds,
+                msg.sender,
+                _reservesCount,
+                ADDRESSES_PROVIDER.getPriceOracle()
+            );
+        }
     }
 
     /// @inheritdoc IPoolCore
@@ -382,7 +382,7 @@ contract PoolCore is
         address user,
         uint256 debtToCover,
         bool receivePToken
-    ) external virtual override {
+    ) external virtual override nonReentrant {
         LiquidationLogic.executeLiquidationCall(
             _reserves,
             _reservesList,
@@ -390,6 +390,7 @@ contract PoolCore is
             DataTypes.ExecuteLiquidationCallParams({
                 reservesCount: _reservesCount,
                 liquidationAmount: debtToCover,
+                auctionRecoveryHealthFactor: _auctionRecoveryHealthFactor,
                 collateralAsset: collateralAsset,
                 liquidationAsset: debtAsset,
                 user: user,
@@ -409,7 +410,7 @@ contract PoolCore is
         uint256 collateralTokenId,
         uint256 liquidationAmount,
         bool receiveNToken
-    ) external virtual override {
+    ) external virtual override nonReentrant {
         LiquidationLogic.executeERC721LiquidationCall(
             _reserves,
             _reservesList,
@@ -417,6 +418,7 @@ contract PoolCore is
             DataTypes.ExecuteLiquidationCallParams({
                 reservesCount: _reservesCount,
                 liquidationAmount: liquidationAmount,
+                auctionRecoveryHealthFactor: _auctionRecoveryHealthFactor,
                 liquidationAsset: liquidationAsset,
                 collateralAsset: collateralAsset,
                 collateralTokenId: collateralTokenId,
@@ -433,13 +435,14 @@ contract PoolCore is
         address user,
         address collateralAsset,
         uint256 collateralTokenId
-    ) external override {
+    ) external override nonReentrant {
         LiquidationLogic.executeStartAuction(
             _reserves,
             _reservesList,
             _usersConfig,
             DataTypes.ExecuteAuctionParams({
                 reservesCount: _reservesCount,
+                auctionRecoveryHealthFactor: _auctionRecoveryHealthFactor,
                 collateralAsset: collateralAsset,
                 collateralTokenId: collateralTokenId,
                 user: user,
@@ -453,13 +456,14 @@ contract PoolCore is
         address user,
         address collateralAsset,
         uint256 collateralTokenId
-    ) external override {
+    ) external override nonReentrant {
         LiquidationLogic.executeEndAuction(
             _reserves,
             _reservesList,
             _usersConfig,
             DataTypes.ExecuteAuctionParams({
                 reservesCount: _reservesCount,
+                auctionRecoveryHealthFactor: _auctionRecoveryHealthFactor,
                 collateralAsset: collateralAsset,
                 collateralTokenId: collateralTokenId,
                 user: user,
@@ -469,12 +473,39 @@ contract PoolCore is
     }
 
     /// @inheritdoc IPoolCore
+    function setAuctionValidityTime(address user)
+        external
+        virtual
+        override
+        nonReentrant
+    {
+        require(user != address(0), Errors.ZERO_ADDRESS_NOT_VALID);
+        DataTypes.UserConfigurationMap storage userConfig = _usersConfig[user];
+        (, , , , , , uint256 erc721HealthFactor) = PoolLogic
+            .executeGetUserAccountData(
+                _reserves,
+                _reservesList,
+                DataTypes.CalculateUserAccountDataParams({
+                    userConfig: userConfig,
+                    reservesCount: _reservesCount,
+                    user: user,
+                    oracle: ADDRESSES_PROVIDER.getPriceOracle()
+                })
+            );
+        require(
+            erc721HealthFactor > _auctionRecoveryHealthFactor,
+            Errors.ERC721_HEALTH_FACTOR_NOT_ABOVE_THRESHOLD
+        );
+        userConfig.auctionValidityTime = block.timestamp;
+    }
+
+    /// @inheritdoc IPoolCore
     function flashClaim(
         address receiverAddress,
         address nftAsset,
         uint256[] calldata nftTokenIds,
         bytes calldata params
-    ) external virtual override {
+    ) external virtual override nonReentrant {
         FlashClaimLogic.executeFlashClaim(
             _reserves,
             DataTypes.ExecuteFlashClaimParams({
@@ -625,12 +656,34 @@ contract PoolCore is
     }
 
     /// @inheritdoc IPoolCore
+    function MAX_ATOMIC_TOKENS_ALLOWED()
+        external
+        view
+        virtual
+        override
+        returns (uint24)
+    {
+        return _maxAtomicTokensAllowed;
+    }
+
+    /// @inheritdoc IPoolCore
+    function AUCTION_RECOVERY_HEALTH_FACTOR()
+        external
+        view
+        virtual
+        override
+        returns (uint64)
+    {
+        return _auctionRecoveryHealthFactor;
+    }
+
+    /// @inheritdoc IPoolCore
     function finalizeTransfer(
         address asset,
         address from,
         address to,
         bool usedAsCollateral,
-        uint256 value,
+        uint256 amount,
         uint256 balanceFromBefore,
         uint256 balanceToBefore
     ) external virtual override {
@@ -638,7 +691,7 @@ contract PoolCore is
             msg.sender == _reserves[asset].xTokenAddress,
             Errors.CALLER_NOT_XTOKEN
         );
-        SupplyLogic.executeFinalizeTransfer(
+        SupplyLogic.executeFinalizeTransferERC20(
             _reserves,
             _reservesList,
             _usersConfig,
@@ -647,7 +700,7 @@ contract PoolCore is
                 from: from,
                 to: to,
                 usedAsCollateral: usedAsCollateral,
-                value: value,
+                amount: amount,
                 balanceFromBefore: balanceFromBefore,
                 balanceToBefore: balanceToBefore,
                 reservesCount: _reservesCount,
@@ -657,14 +710,34 @@ contract PoolCore is
     }
 
     /// @inheritdoc IPoolCore
-    function getAuctionConfiguration(address asset)
-        external
-        view
-        virtual
-        override
-        returns (DataTypes.ReserveAuctionConfigurationMap memory)
-    {
-        return _reserves[asset].auctionConfiguration;
+    function finalizeTransferERC721(
+        address asset,
+        address from,
+        address to,
+        bool usedAsCollateral,
+        uint256 balanceFromBefore,
+        uint256 balanceToBefore
+    ) external virtual override {
+        require(
+            msg.sender == _reserves[asset].xTokenAddress,
+            Errors.CALLER_NOT_XTOKEN
+        );
+        SupplyLogic.executeFinalizeTransferERC721(
+            _reserves,
+            _reservesList,
+            _usersConfig,
+            DataTypes.FinalizeTransferParams({
+                asset: asset,
+                from: from,
+                to: to,
+                usedAsCollateral: usedAsCollateral,
+                amount: 1,
+                balanceFromBefore: balanceFromBefore,
+                balanceToBefore: balanceToBefore,
+                reservesCount: _reservesCount,
+                oracle: ADDRESSES_PROVIDER.getPriceOracle()
+            })
+        );
     }
 
     /// @inheritdoc IPoolCore
@@ -683,28 +756,30 @@ contract PoolCore is
             Errors.ASSET_NOT_LISTED
         );
 
-        uint256 startTime = IAuctionableERC721(ntokenAsset)
-            .getAuctionData(tokenId)
-            .startTime;
-        IReserveAuctionStrategy auctionStrategy = IReserveAuctionStrategy(
-            reserve.auctionStrategyAddress
-        );
+        if (reserve.auctionStrategyAddress != address(0)) {
+            uint256 startTime = IAuctionableERC721(ntokenAsset)
+                .getAuctionData(tokenId)
+                .startTime;
+            IReserveAuctionStrategy auctionStrategy = IReserveAuctionStrategy(
+                reserve.auctionStrategyAddress
+            );
 
-        auctionData.startTime = startTime;
-        auctionData.asset = underlyingAsset;
-        auctionData.tokenId = tokenId;
-        auctionData.currentPriceMultiplier = auctionStrategy
-            .calculateAuctionPriceMultiplier(startTime, block.timestamp);
+            auctionData.startTime = startTime;
+            auctionData.asset = underlyingAsset;
+            auctionData.tokenId = tokenId;
+            auctionData.currentPriceMultiplier = auctionStrategy
+                .calculateAuctionPriceMultiplier(startTime, block.timestamp);
 
-        auctionData.maxPriceMultiplier = auctionStrategy
-            .getMaxPriceMultiplier();
-        auctionData.minExpPriceMultiplier = auctionStrategy
-            .getMinExpPriceMultiplier();
-        auctionData.minPriceMultiplier = auctionStrategy
-            .getMinPriceMultiplier();
-        auctionData.stepLinear = auctionStrategy.getStepLinear();
-        auctionData.stepExp = auctionStrategy.getStepExp();
-        auctionData.tickLength = auctionStrategy.getTickLength();
+            auctionData.maxPriceMultiplier = auctionStrategy
+                .getMaxPriceMultiplier();
+            auctionData.minExpPriceMultiplier = auctionStrategy
+                .getMinExpPriceMultiplier();
+            auctionData.minPriceMultiplier = auctionStrategy
+                .getMinPriceMultiplier();
+            auctionData.stepLinear = auctionStrategy.getStepLinear();
+            auctionData.stepExp = auctionStrategy.getStepExp();
+            auctionData.tickLength = auctionStrategy.getTickLength();
+        }
     }
 
     // This function is necessary when receive erc721 from looksrare

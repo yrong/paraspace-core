@@ -46,12 +46,6 @@ interface IPoolConfigurator {
         uint256 liquidationBonus
     );
 
-    event AuctionConfigurationChanged(
-        address indexed asset,
-        bool enabled,
-        uint256 recoveryHealthFactor
-    );
-
     /**
      * @dev Emitted when stable rate borrowing is enabled or disabled on a reserve
      * @param asset The address of the underlying asset of the reserve
@@ -72,6 +66,13 @@ interface IPoolConfigurator {
      * @param frozen True if reserve is frozen, false otherwise
      **/
     event ReserveFrozen(address indexed asset, bool frozen);
+
+    /**
+     * @dev Emitted when a reserve has dynamic configs enabled
+     * @param asset The address of the underlying asset of the reserve
+     * @param enabled True if reserve dynamic configs is enabled
+     **/
+    event ReserveDynamicConfigsEnabled(address indexed asset, bool enabled);
 
     /**
      * @dev Emitted when a reserve is paused or unpaused
@@ -153,6 +154,18 @@ interface IPoolConfigurator {
      * @param newStrategy The address of the new interest strategy contract
      **/
     event ReserveDynamicConfigsStrategyChanged(
+        address indexed asset,
+        address oldStrategy,
+        address newStrategy
+    );
+
+    /**
+     * @dev Emitted when a reserve auction strategy contract is updated.
+     * @param asset The address of the underlying asset of the reserve
+     * @param oldStrategy The address of the old auction strategy contract
+     * @param newStrategy The address of the new auction strategy contract
+     **/
+    event ReserveAuctionStrategyChanged(
         address indexed asset,
         address oldStrategy,
         address newStrategy
@@ -262,12 +275,6 @@ interface IPoolConfigurator {
         uint256 liquidationBonus
     ) external;
 
-    function configureReserveAsAuctionCollateral(
-        address asset,
-        bool auctionEnabled,
-        uint256 recoveryHealthFactor
-    ) external;
-
     /**
      * @notice Enable or disable stable rate borrowing on a reserve.
      * @dev Can only be enabled (set to true) if borrowing is enabled
@@ -293,6 +300,13 @@ interface IPoolConfigurator {
     function setReserveFreeze(address asset, bool freeze) external;
 
     /**
+     * @notice enable or disable dynamic configs
+     * @param asset The address of the underlying asset of the reserve
+     * @param enabled True if the reserve needs to enable dynamic configs
+     **/
+    function setDynamicConfigsEnabled(address asset, bool enabled) external;
+
+    /**
      * @notice Pauses a reserve. A paused reserve does not allow any interaction (supply, borrow, repay,
      * swap interest rate, liquidate, xtoken transfers).
      * @param asset The address of the underlying asset of the reserve
@@ -305,6 +319,12 @@ interface IPoolConfigurator {
      * @param value The maximum amount
      */
     function setMaxAtomicTokensAllowed(uint24 value) external;
+
+    /**
+     * @notice set the auction recovery health factor
+     * @param value The auction recovery health factor
+     */
+    function setAuctionRecoveryHealthFactor(uint64 value) external;
 
     /**
      * @notice Updates the reserve factor of a reserve.
@@ -321,6 +341,16 @@ interface IPoolConfigurator {
     function setReserveInterestRateStrategyAddress(
         address asset,
         address newRateStrategyAddress
+    ) external;
+
+    /**
+     * @notice Sets the auction strategy of a reserve
+     * @param asset The address of the underlying asset of the reserve
+     * @param newAuctionStrategyAddress The address of the new auction strategy contract
+     **/
+    function setReserveAuctionStrategyAddress(
+        address asset,
+        address newAuctionStrategyAddress
     ) external;
 
     /**

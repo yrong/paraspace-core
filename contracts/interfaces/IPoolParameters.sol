@@ -40,7 +40,6 @@ interface IPoolParameters {
      **/
     function initReserve(
         address asset,
-        DataTypes.AssetType assetType,
         address xTokenAddress,
         address stableDebtAddress,
         address variableDebtAddress,
@@ -89,17 +88,6 @@ interface IPoolParameters {
     ) external;
 
     /**
-     * @notice Sets the auction configuration bitmap of the reserve as a whole
-     * @dev Only callable by the PoolConfigurator contract
-     * @param asset The address of the underlying asset of the reserve
-     * @param auctionConfiguration The new auction configuration bitmap
-     **/
-    function setAuctionConfiguration(
-        address asset,
-        DataTypes.ReserveAuctionConfigurationMap calldata auctionConfiguration
-    ) external;
-
-    /**
      * @notice Mints the assets accrued through the reserve factor to the treasury in the form of xTokens
      * @param assets The list of reserves for which the minting needs to be executed
      **/
@@ -140,7 +128,7 @@ interface IPoolParameters {
         address asset,
         address user,
         uint24 changeBy
-    ) external virtual;
+    ) external;
 
     /**
      * @notice decrease user's total atomic tokens counter
@@ -152,11 +140,17 @@ interface IPoolParameters {
         address asset,
         address user,
         uint24 changeBy
-    ) external virtual;
+    ) external;
 
     /**
      * @notice set the maximum allowed atomic tokens per user
      * @param value The maximum amount
      */
-    function setMaxAtomicTokensAllowed(uint24 value) external virtual;
+    function setMaxAtomicTokensAllowed(uint24 value) external;
+
+    /**
+     * @notice Set the auction recovery health factor
+     * @param value The new auction health factor
+     */
+    function setAuctionRecoveryHealthFactor(uint64 value) external;
 }

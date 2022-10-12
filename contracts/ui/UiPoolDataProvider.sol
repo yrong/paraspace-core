@@ -88,9 +88,6 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
     {
         IParaSpaceOracle oracle = IParaSpaceOracle(provider.getPriceOracle());
         IPool pool = IPool(provider.getPool());
-        ProtocolDataProvider poolDataProvider = ProtocolDataProvider(
-            provider.getPoolDataProvider()
-        );
 
         address[] memory reserves = pool.getReservesList();
         AggregatedReserveData[]
@@ -120,17 +117,24 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
                 .stableDebtTokenAddress;
             reserveData.variableDebtTokenAddress = baseData
                 .variableDebtTokenAddress;
-            //address of the interest rate strategy
+
             reserveData.interestRateStrategyAddress = baseData
                 .interestRateStrategyAddress;
+            reserveData.auctionStrategyAddress = baseData
+                .auctionStrategyAddress;
+            reserveData.auctionEnabled =
+                reserveData.auctionStrategyAddress != address(0);
+            reserveData.dynamicConfigsStrategyAddress = baseData
+                .dynamicConfigsStrategyAddress;
+
             try oracle.getAssetPrice(reserveData.underlyingAsset) returns (
                 uint256 price
             ) {
                 reserveData.priceInMarketReferenceCurrency = price;
             } catch {}
-            // reserveData.priceOracle = oracle.getSourceOfAsset(
-            //     reserveData.underlyingAsset
-            // );
+            reserveData.priceOracle = oracle.getSourceOfAsset(
+                reserveData.underlyingAsset
+            );
 
             (
                 reserveData.totalPrincipalStableDebt,
@@ -142,9 +146,20 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
             reserveData.totalScaledVariableDebt = IVariableDebtToken(
                 reserveData.variableDebtTokenAddress
             ).scaledTotalSupply();
-            reserveData.assetType = baseData.assetType;
+            DataTypes.ReserveConfigurationMap
+                memory reserveConfigurationMap = baseData.configuration;
+            bool isPaused;
+            DataTypes.AssetType assetType;
+            (
+                reserveData.isActive,
+                reserveData.isFrozen,
+                reserveData.borrowingEnabled,
+                reserveData.stableBorrowRateEnabled,
+                isPaused,
+                assetType
+            ) = reserveConfigurationMap.getFlags();
 
-            if (baseData.assetType == DataTypes.AssetType.ERC20) {
+            if (assetType == DataTypes.AssetType.ERC20) {
                 // Due we take the symbol from underlying token we need a special case for $MKR as symbol() returns bytes32
                 if (
                     address(reserveData.underlyingAsset) == address(MKR_ADDRESS)
@@ -172,27 +187,16 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
                 ).balanceOf(reserveData.xTokenAddress);
             }
 
-            DataTypes.ReserveConfigurationMap
-                memory reserveConfigurationMap = baseData.configuration;
-            //uint256 eModeCategoryId;
             (
                 reserveData.baseLTVasCollateral,
                 reserveData.reserveLiquidationThreshold,
                 reserveData.reserveLiquidationBonus,
                 reserveData.decimals,
-                reserveData.reserveFactor
+                reserveData.reserveFactor,
+                reserveData.dynamicConfigsEnabled
             ) = reserveConfigurationMap.getParams();
             reserveData.usageAsCollateralEnabled =
                 reserveData.baseLTVasCollateral != 0;
-
-            bool isPaused;
-            (
-                reserveData.isActive,
-                reserveData.isFrozen,
-                reserveData.borrowingEnabled,
-                reserveData.stableBorrowRateEnabled,
-                isPaused
-            ) = reserveConfigurationMap.getFlags();
 
             InterestRates memory interestRates = getInterestRateStrategySlopes(
                 DefaultReserveInterestRateStrategy(
@@ -210,30 +214,14 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
                 .baseVariableBorrowRate;
             reserveData.optimalUsageRatio = interestRates.optimalUsageRatio;
 
-            // v3 only
-            reserveData.eModeCategoryId = 0;
-            // reserveData.debtCeiling = reserveConfigurationMap.getDebtCeiling();
-            // reserveData.debtCeilingDecimals = poolDataProvider
-            //     .getDebtCeilingDecimals();
             (
                 reserveData.borrowCap,
                 reserveData.supplyCap
             ) = reserveConfigurationMap.getCaps();
 
             reserveData.isPaused = isPaused;
-            reserveData.unbacked = 0;
-            reserveData.isolationModeTotalDebt = 0;
+            reserveData.assetType = assetType;
             reserveData.accruedToTreasury = baseData.accruedToTreasury;
-
-            //DataTypes.EModeCategory memory categoryData = pool.getEModeCategoryData(reserveData.eModeCategoryId);
-            reserveData.eModeLtv = 0;
-            reserveData.eModeLiquidationThreshold = 0;
-            reserveData.eModeLiquidationBonus = 0;
-            // each eMode category may or may not have a custom oracle to override the individual assets price oracles
-            reserveData.eModePriceSource = address(0);
-            reserveData.eModeLabel = "";
-
-            reserveData.borrowableInIsolation = false; // reserveConfigurationMap.getBorrowableInIsolation();
         }
 
         BaseCurrencyInfo memory baseCurrencyInfo;
@@ -271,7 +259,7 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
 
     function getAuctionData(
         IPoolAddressesProvider provider,
-        address user,
+        address,
         address[] memory nTokenAddresses,
         uint256[][] memory tokenIds
     ) external view override returns (DataTypes.AuctionData[][] memory) {
@@ -295,7 +283,7 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
     }
 
     function getNTokenData(
-        address user,
+        address,
         address[] memory nTokenAddresses,
         uint256[][] memory tokenIds
     ) external view override returns (DataTypes.NTokenData[][] memory) {
@@ -381,8 +369,7 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
 
             (
                 lpTokenInfo.baseLTVasCollateral,
-                lpTokenInfo.reserveLiquidationThreshold,
-
+                lpTokenInfo.reserveLiquidationThreshold
             ) = dynamicConfigsStrategy.getConfigParams(tokenId);
         } catch {}
 
@@ -393,14 +380,12 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
         external
         view
         override
-        returns (UserReserveData[] memory, uint8)
+        returns (UserReserveData[] memory)
     {
         IPool pool = IPool(provider.getPool());
         address[] memory reserves = pool.getReservesList();
         DataTypes.UserConfigurationMap memory userConfig = pool
             .getUserConfiguration(user);
-
-        uint8 userEmodeCategoryId = 0;
 
         UserReserveData[] memory userReservesData = new UserReserveData[](
             user != address(0) ? reserves.length : 0
@@ -413,7 +398,11 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
 
             // user reserve data
             userReservesData[i].underlyingAsset = reserves[i];
-            if (baseData.assetType == DataTypes.AssetType.ERC20) {
+
+            if (
+                baseData.configuration.getAssetType() ==
+                DataTypes.AssetType.ERC20
+            ) {
                 userReservesData[i].scaledXTokenBalance = IPToken(
                     baseData.xTokenAddress
                 ).scaledBalanceOf(user);
@@ -448,7 +437,7 @@ contract UiPoolDataProvider is IUiPoolDataProvider {
             }
         }
 
-        return (userReservesData, userEmodeCategoryId);
+        return userReservesData;
     }
 
     function bytes32ToString(bytes32 _bytes32)
