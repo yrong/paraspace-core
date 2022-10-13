@@ -20,7 +20,6 @@ import {INToken} from "../../../interfaces/INToken.sol";
 import {PRBMath} from "../../../dependencies/math/PRBMath.sol";
 import {PRBMathUD60x18} from "../../../dependencies/math/PRBMathUD60x18.sol";
 import {IReserveAuctionStrategy} from "../../../interfaces/IReserveAuctionStrategy.sol";
-import {IStableDebtToken} from "../../../interfaces/IStableDebtToken.sol";
 import {IVariableDebtToken} from "../../../interfaces/IVariableDebtToken.sol";
 import {IPriceOracleGetter} from "../../../interfaces/IPriceOracleGetter.sol";
 
@@ -719,14 +718,6 @@ library LiquidationLogic {
                         vars.debtReserveCache.nextVariableBorrowIndex
                     );
             }
-            (
-                vars.debtReserveCache.nextTotalStableDebt,
-                vars.debtReserveCache.nextAvgStableBorrowRate
-            ) = IStableDebtToken(vars.debtReserveCache.stableDebtTokenAddress)
-                .burn(
-                    params.user,
-                    vars.actualDebtToLiquidate - vars.userVariableDebt
-                );
         }
     }
 
@@ -751,11 +742,13 @@ library LiquidationLogic {
             uint256
         )
     {
-        (uint256 userStableDebt, uint256 userVariableDebt) = Helpers
-            .getUserCurrentDebt(params.user, debtReserveCache);
+        uint256 userVariableDebt = Helpers.getUserCurrentDebt(
+            params.user,
+            debtReserveCache
+        );
 
-        uint256 userTotalDebt = userStableDebt + userVariableDebt;
         // userTotalDebt = debt of the borrowed position needed for liquidation
+        uint256 userTotalDebt = userVariableDebt;
 
         uint256 actualDebtToLiquidate = params.liquidationAmount > userTotalDebt
             ? userTotalDebt

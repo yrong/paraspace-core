@@ -22,7 +22,6 @@ makeSuite("PoolConfigurator: Modifiers", (testEnv: TestEnv) => {
       {
         xTokenImpl: randomAddress,
         assetType: 0,
-        stableDebtTokenImpl: randomAddress,
         variableDebtTokenImpl: randomAddress,
         underlyingAssetDecimals: randomNumber,
         interestRateStrategyAddress: randomAddress,
@@ -35,8 +34,6 @@ makeSuite("PoolConfigurator: Modifiers", (testEnv: TestEnv) => {
         xTokenSymbol: "MOCK",
         variableDebtTokenName: "MOCK",
         variableDebtTokenSymbol: "MOCK",
-        stableDebtTokenName: "MOCK",
-        stableDebtTokenSymbol: "MOCK",
         params: "0x10",
       },
     ];
@@ -76,13 +73,9 @@ makeSuite("PoolConfigurator: Modifiers", (testEnv: TestEnv) => {
     const calls = [
       {fn: "dropReserve", args: [randomAddress]},
       {fn: "updatePToken", args: [randomUpdatePToken]},
-      {fn: "updateStableDebtToken", args: [randomUpdateDebtToken]},
       {fn: "updateVariableDebtToken", args: [randomUpdateDebtToken]},
       {fn: "setReserveActive", args: [randomAddress, true]},
       {fn: "setReserveActive", args: [randomAddress, false]},
-      // { fn: "updateFlashloanPremiumTotal", args: [randomNumber] },
-      // { fn: "updateFlashloanPremiumToProtocol", args: [randomNumber] },
-      // { fn: "updateFlashloanPremiumToProtocol", args: [randomNumber] },
     ];
     for (const call of calls) {
       // failing here
@@ -106,8 +99,6 @@ makeSuite("PoolConfigurator: Modifiers", (testEnv: TestEnv) => {
         fn: "configureReserveAsCollateral",
         args: [randomAddress, randomNumber, randomNumber, randomNumber],
       },
-      {fn: "setReserveStableRateBorrowing", args: [randomAddress, true]},
-      {fn: "setReserveStableRateBorrowing", args: [randomAddress, false]},
       {fn: "setReserveFreeze", args: [randomAddress, true]},
       {fn: "setReserveFreeze", args: [randomAddress, false]},
       {fn: "setReserveFactor", args: [randomAddress, randomNumber]},
@@ -117,19 +108,6 @@ makeSuite("PoolConfigurator: Modifiers", (testEnv: TestEnv) => {
         fn: "setReserveInterestRateStrategyAddress",
         args: [randomAddress, randomAddress],
       },
-      // {
-      //   fn: "setEModeCategory",
-      //   args: [
-      //     randomNumber,
-      //     randomNumber,
-      //     randomNumber,
-      //     randomNumber,
-      //     randomAddress,
-      //     "",
-      //   ],
-      // },
-      // { fn: "setAssetEModeCategory", args: [randomAddress, randomNumber] },
-      // { fn: "setDebtCeiling", args: [randomAddress, randomNumber] },
     ];
     for (const call of calls) {
       // failing here

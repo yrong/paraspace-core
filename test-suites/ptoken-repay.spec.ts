@@ -12,7 +12,6 @@ import {
 import {RateMode} from "../deploy/helpers/types";
 import {
   DefaultReserveInterestRateStrategy__factory,
-  StableDebtToken__factory,
   VariableDebtToken__factory,
 } from "../types";
 import {TestEnv, makeSuite} from "./helpers/make-suite";
@@ -272,12 +271,6 @@ makeSuite("PToken: Repay", (testEnv: TestEnv) => {
       user.signer
     );
 
-    const stableDebtToken = StableDebtToken__factory.connect(
-      reserveData.stableDebtTokenAddress,
-      user.signer
-    );
-    const stableDebtData = await stableDebtToken.getSupplyData();
-
     const variableDebtToken = VariableDebtToken__factory.connect(
       reserveData.variableDebtTokenAddress,
       user.signer
@@ -291,18 +284,15 @@ makeSuite("PToken: Repay", (testEnv: TestEnv) => {
       // unbacked: 0,
       liquidityAdded: 0,
       liquidityTaken: 0,
-      totalStableDebt: stableDebtData[1],
       totalVariableDebt: variableDebt,
       xToken: pDai.address,
       reserve: dai.address,
       reserveFactor: (
         await helpersContract.getReserveConfigurationData(dai.address)
       ).reserveFactor,
-      averageStableBorrowRate: stableDebtData[2],
     });
 
     expect(reserveData.currentLiquidityRate).to.be.eq(expectedRates[0]);
-    expect(reserveData.currentStableBorrowRate).to.be.eq(expectedRates[1]);
-    expect(reserveData.currentVariableBorrowRate).to.be.eq(expectedRates[2]);
+    expect(reserveData.currentVariableBorrowRate).to.be.eq(expectedRates[1]);
   });
 });

@@ -2,15 +2,11 @@ import {
   calcExpectedReserveDataAfterBorrow,
   calcExpectedReserveDataAfterDeposit,
   calcExpectedReserveDataAfterRepay,
-  calcExpectedReserveDataAfterStableRateRebalance,
-  calcExpectedReserveDataAfterSwapRateMode,
   calcExpectedReserveDataAfterWithdraw,
   calcExpectedUserDataAfterBorrow,
   calcExpectedUserDataAfterDeposit,
   calcExpectedUserDataAfterRepay,
   calcExpectedUserDataAfterSetUseAsCollateral,
-  calcExpectedUserDataAfterStableRateRebalance,
-  calcExpectedUserDataAfterSwapRateMode,
   calcExpectedUserDataAfterWithdraw,
 } from "./utils/calculations";
 import {
@@ -27,7 +23,6 @@ import {convertToCurrencyDecimals} from "../../deploy/helpers/contracts-helpers"
 import {
   getPToken,
   getMintableERC20,
-  getStableDebtToken,
   getVariableDebtToken,
   getChainId,
 } from "../../deploy/helpers/contracts-getters";
@@ -60,11 +55,9 @@ const almostEqualOrEqual = function (
   keys.forEach((key) => {
     if (
       key === "lastUpdateTimestamp" ||
-      key === "marketStableRate" ||
       key === "symbol" ||
       key === "xTokenAddress" ||
-      key === "decimals" ||
-      key === "totalStableDebtLastUpdated"
+      key === "decimals"
     ) {
       // skipping consistency check on accessory data
       return;
@@ -350,10 +343,9 @@ export const delegateBorrowAllowance = async (
 
   const reserveData = await pool.getReserveData(reserveAddress);
 
-  const debtToken =
-    interestRateMode === "1"
-      ? await getStableDebtToken(reserveData.stableDebtTokenAddress)
-      : await getVariableDebtToken(reserveData.variableDebtTokenAddress);
+  const debtToken = await getVariableDebtToken(
+    reserveData.variableDebtTokenAddress
+  );
 
   const delegateAllowancePromise = debtToken
     .connect(user.signer)
@@ -377,7 +369,6 @@ export const delegateBorrowAllowance = async (
 export const borrow = async (
   reserveSymbol: string,
   amount: string,
-  interestRateMode: string,
   user: SignerWithAddress,
   onBehalfOf: tEthereumAddress,
   timeTravel: string,
@@ -878,129 +869,6 @@ export const setUseAsCollateral = async (
       pool
         .connect(user.signer)
         .setUserUseERC20AsCollateral(reserve, useAsCollateralBool),
-      revertMessage
-    ).to.be.reverted;
-  }
-};
-
-export const swapBorrowRateMode = async (
-  reserveSymbol: string,
-  user: SignerWithAddress,
-  rateMode: string,
-  expectedResult: string,
-  testEnv: TestEnv,
-  revertMessage?: string
-) => {
-  const {pool} = testEnv;
-
-  const reserve = await getTokenAddressFromSymbol(reserveSymbol);
-
-  const {reserveData: reserveDataBefore, userData: userDataBefore} =
-    await getContractsData(reserve, user.address, testEnv);
-
-  if (expectedResult === "success") {
-    const txResult = await waitForTx(
-      await pool.connect(user.signer).swapBorrowRateMode(reserve, rateMode)
-    );
-
-    const {txCost, txTimestamp} = await getTxCostAndTimestamp(txResult);
-
-    const {reserveData: reserveDataAfter, userData: userDataAfter} =
-      await getContractsData(reserve, user.address, testEnv);
-
-    const expectedReserveData = calcExpectedReserveDataAfterSwapRateMode(
-      reserveDataBefore,
-      userDataBefore,
-      rateMode,
-      txTimestamp
-    );
-
-    const expectedUserData = calcExpectedUserDataAfterSwapRateMode(
-      reserveDataBefore,
-      expectedReserveData,
-      userDataBefore,
-      rateMode,
-      txCost,
-      txTimestamp
-    );
-
-    expectEqual(reserveDataAfter, expectedReserveData);
-    expectEqual(userDataAfter, expectedUserData);
-
-    // truffleAssert.eventEmitted(txResult, "Swap", (ev: any) => {
-    //   const {_user, _reserve, _newRateMode, _newRate} = ev;
-    //   return (
-    //     _user === user &&
-    //     _reserve == reserve &&
-    //     new BigNumber(_newRateMode).eq(expectedUserData.borrowRateMode) &&
-    //     new BigNumber(_newRate).eq(expectedUserData.borrowRate)
-    //   );
-    // });
-  } else if (expectedResult === "revert") {
-    await expect(
-      pool.connect(user.signer).swapBorrowRateMode(reserve, rateMode),
-      revertMessage
-    ).to.be.reverted;
-  }
-};
-
-export const rebalanceStableBorrowRate = async (
-  reserveSymbol: string,
-  user: SignerWithAddress,
-  target: SignerWithAddress,
-  expectedResult: string,
-  testEnv: TestEnv,
-  revertMessage?: string
-) => {
-  const {pool} = testEnv;
-
-  const reserve = await getTokenAddressFromSymbol(reserveSymbol);
-
-  const {reserveData: reserveDataBefore, userData: userDataBefore} =
-    await getContractsData(reserve, target.address, testEnv);
-
-  if (expectedResult === "success") {
-    const txResult = await waitForTx(
-      await pool
-        .connect(user.signer)
-        .rebalanceStableBorrowRate(reserve, target.address)
-    );
-
-    const {txCost, txTimestamp} = await getTxCostAndTimestamp(txResult);
-
-    const {reserveData: reserveDataAfter, userData: userDataAfter} =
-      await getContractsData(reserve, target.address, testEnv);
-
-    const expectedReserveData = calcExpectedReserveDataAfterStableRateRebalance(
-      reserveDataBefore,
-      userDataBefore,
-      txTimestamp
-    );
-
-    const expectedUserData = calcExpectedUserDataAfterStableRateRebalance(
-      reserveDataBefore,
-      expectedReserveData,
-      userDataBefore,
-      txCost,
-      txTimestamp
-    );
-
-    expectEqual(reserveDataAfter, expectedReserveData);
-    expectEqual(userDataAfter, expectedUserData);
-
-    // truffleAssert.eventEmitted(txResult, 'RebalanceStableBorrowRate', (ev: any) => {
-    //   const {_user, _reserve, _newStableRate} = ev;
-    //   return (
-    //     _user.toLowerCase() === target.toLowerCase() &&
-    //     _reserve.toLowerCase() === reserve.toLowerCase() &&
-    //     new BigNumber(_newStableRate).eq(expectedUserData.borrowRate)
-    //   );
-    // });
-  } else if (expectedResult === "revert") {
-    await expect(
-      pool
-        .connect(user.signer)
-        .rebalanceStableBorrowRate(reserve, target.address),
       revertMessage
     ).to.be.reverted;
   }

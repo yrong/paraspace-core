@@ -5,10 +5,8 @@ import {
   getFirstSigner,
   getMockInitializableImple,
   getMockInitializableImpleV2,
-  getMockStableDebtToken,
   getMockVariableDebtToken,
   getPToken,
-  getStableDebtToken,
   getVariableDebtToken,
 } from "../deploy/helpers/contracts-getters";
 import {
@@ -18,7 +16,6 @@ import {
   deployMockInitializableImpleV2,
   deployMockPToken,
   deployMockReentrantInitializableImple,
-  deployMockStableDebtToken,
   deployMockVariableDebtToken,
 } from "../deploy/helpers/contracts-deployments";
 import {getEthersSigners} from "../deploy/helpers/contracts-helpers";
@@ -461,7 +458,6 @@ makeSuite("Upgradeability", (testEnv: TestEnv) => {
   context("PoolConfigurator upgrade ability", () => {
     const {CALLER_NOT_POOL_ADMIN} = ProtocolErrors;
     let newPTokenAddress: string;
-    let newStableTokenAddress: string;
     let newVariableTokenAddress: string;
 
     before("deploying instances", async () => {
@@ -476,15 +472,6 @@ makeSuite("Upgradeability", (testEnv: TestEnv) => {
         "0x10",
       ]);
 
-      const stableDebtTokenInstance = await deployMockStableDebtToken([
-        pool.address,
-        dai.address,
-        ZERO_ADDRESS,
-        "ParaSpace stable debt bearing DAI updated",
-        "stableDebtDAI",
-        "0x10",
-      ]);
-
       const variableDebtTokenInstance = await deployMockVariableDebtToken([
         pool.address,
         dai.address,
@@ -496,7 +483,6 @@ makeSuite("Upgradeability", (testEnv: TestEnv) => {
 
       newPTokenAddress = xTokenInstance.address;
       newVariableTokenAddress = variableDebtTokenInstance.address;
-      newStableTokenAddress = stableDebtTokenInstance.address;
     });
 
     it("Tries to update the DAI Ptoken implementation with a different address than the poolManager", async () => {
@@ -558,80 +544,6 @@ makeSuite("Upgradeability", (testEnv: TestEnv) => {
 
       expect(tokenName).to.be.eq(
         "ParaSpace Interest bearing DAI updated",
-        "Invalid token name"
-      );
-    });
-
-    it("Tries to update the DAI Stable debt token implementation with a different address than the poolManager", async () => {
-      const {dai, configurator, users} = testEnv;
-
-      const name = await (
-        await getStableDebtToken(newStableTokenAddress)
-      ).name();
-      const symbol = await (
-        await getStableDebtToken(newStableTokenAddress)
-      ).symbol();
-
-      const updateDebtTokenInput: {
-        asset: string;
-        incentivesController: string;
-        name: string;
-        symbol: string;
-        implementation: string;
-        params: string;
-      } = {
-        asset: dai.address,
-        incentivesController: ZERO_ADDRESS,
-        name: name,
-        symbol: symbol,
-        implementation: newStableTokenAddress,
-        params: "0x10",
-      };
-
-      await expect(
-        configurator
-          .connect(users[1].signer)
-          .updateStableDebtToken(updateDebtTokenInput)
-      ).to.be.revertedWith(CALLER_NOT_POOL_ADMIN);
-    });
-
-    it("Upgrades the DAI stable debt token implementation ", async () => {
-      const {dai, configurator, helpersContract} = testEnv;
-
-      const name = await (
-        await getStableDebtToken(newStableTokenAddress)
-      ).name();
-      const symbol = await (
-        await getStableDebtToken(newStableTokenAddress)
-      ).symbol();
-
-      const updateDebtTokenInput: {
-        asset: string;
-        incentivesController: string;
-        name: string;
-        symbol: string;
-        implementation: string;
-        params: string;
-      } = {
-        asset: dai.address,
-        incentivesController: ZERO_ADDRESS,
-        name: name,
-        symbol: symbol,
-        implementation: newStableTokenAddress,
-        params: "0x10",
-      };
-
-      await configurator.updateStableDebtToken(updateDebtTokenInput);
-
-      const {stableDebtTokenAddress} =
-        await helpersContract.getReserveTokensAddresses(dai.address);
-
-      const debtToken = await getMockStableDebtToken(stableDebtTokenAddress);
-
-      const tokenName = await debtToken.name();
-
-      expect(tokenName).to.be.eq(
-        "ParaSpace stable debt bearing DAI updated",
         "Invalid token name"
       );
     });

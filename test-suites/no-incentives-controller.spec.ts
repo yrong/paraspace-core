@@ -7,7 +7,6 @@ import {
   ERC20__factory,
   MintableERC20,
   MintableERC20__factory,
-  StableDebtToken__factory,
   VariableDebtToken__factory,
 } from "../types";
 import {getFirstSigner} from "../deploy/helpers/contracts-getters";
@@ -32,9 +31,6 @@ makeSuite("Reserve Without Incentives Controller", (testEnv) => {
       "18"
     );
 
-    const stableDebtTokenImplementation = await new StableDebtToken__factory(
-      await getFirstSigner()
-    ).deploy(pool.address);
     const variableDebtTokenImplementation =
       await new VariableDebtToken__factory(await getFirstSigner()).deploy(
         pool.address
@@ -69,7 +65,6 @@ makeSuite("Reserve Without Incentives Controller", (testEnv) => {
     // Init the reserve
     const initInputParams: {
       xTokenImpl: string;
-      stableDebtTokenImpl: string;
       variableDebtTokenImpl: string;
       underlyingAssetDecimals: BigNumberish;
       interestRateStrategyAddress: string;
@@ -82,13 +77,10 @@ makeSuite("Reserve Without Incentives Controller", (testEnv) => {
       xTokenSymbol: string;
       variableDebtTokenName: string;
       variableDebtTokenSymbol: string;
-      stableDebtTokenName: string;
-      stableDebtTokenSymbol: string;
       params: string;
     }[] = [
       {
         xTokenImpl: xTokenImplementation.address,
-        stableDebtTokenImpl: stableDebtTokenImplementation.address,
         variableDebtTokenImpl: variableDebtTokenImplementation.address,
         underlyingAssetDecimals: 18,
         interestRateStrategyAddress: interestRateStrategyAddress,
@@ -101,8 +93,6 @@ makeSuite("Reserve Without Incentives Controller", (testEnv) => {
         xTokenSymbol: "PMOCK",
         variableDebtTokenName: "VMOCK",
         variableDebtTokenSymbol: "VMOCK",
-        stableDebtTokenName: "SMOCK",
-        stableDebtTokenSymbol: "SMOCK",
         params: "0x10",
       },
     ];
@@ -122,7 +112,6 @@ makeSuite("Reserve Without Incentives Controller", (testEnv) => {
       reserveFactor: BigNumberish;
       borrowCap: BigNumberish;
       supplyCap: BigNumberish;
-      stableBorrowingEnabled: boolean;
       borrowingEnabled: boolean;
     }[] = [
       {
@@ -133,7 +122,6 @@ makeSuite("Reserve Without Incentives Controller", (testEnv) => {
         reserveFactor: daiReserveConfigurationData.reserveFactor,
         borrowCap: 68719476735,
         supplyCap: 68719476735,
-        stableBorrowingEnabled: true,
         borrowingEnabled: true,
       },
     ];
@@ -154,10 +142,6 @@ makeSuite("Reserve Without Incentives Controller", (testEnv) => {
     await configurator.setBorrowCap(
       inputParams[i].asset,
       inputParams[i].borrowCap
-    );
-    await configurator.setReserveStableRateBorrowing(
-      inputParams[i].asset,
-      inputParams[i].stableBorrowingEnabled
     );
 
     await configurator

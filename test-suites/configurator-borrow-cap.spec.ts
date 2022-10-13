@@ -283,7 +283,7 @@ makeSuite("PoolConfigurator: Borrow Cap", (testEnv: TestEnv) => {
     await advanceTimeAndBlock(3600);
 
     const wethData = await helpersContract.getReserveData(weth.address);
-    const totalDebt = wethData.totalVariableDebt.add(wethData.totalStableDebt);
+    const totalDebt = wethData.totalVariableDebt;
     const wethCaps = await helpersContract.getReserveCaps(weth.address);
 
     expect(totalDebt).gt(wethCaps.borrowCap);
