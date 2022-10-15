@@ -22,6 +22,7 @@ import {PRBMathUD60x18} from "../../../dependencies/math/PRBMathUD60x18.sol";
 import {IReserveAuctionStrategy} from "../../../interfaces/IReserveAuctionStrategy.sol";
 import {IVariableDebtToken} from "../../../interfaces/IVariableDebtToken.sol";
 import {IPriceOracleGetter} from "../../../interfaces/IPriceOracleGetter.sol";
+import "hardhat/console.sol";
 
 /**
  * @title LiquidationLogic library
@@ -375,7 +376,11 @@ library LiquidationLogic {
         mapping(address => DataTypes.UserConfigurationMap) storage usersConfig,
         DataTypes.ExecuteLiquidationCallParams memory params
     ) external {
+        console.log("\n******executeERC721LiquidationCall********\n");
+
         LiquidationCallLocalVars memory vars;
+
+        vars.liquidator = msg.sender;
 
         DataTypes.ReserveData storage collateralReserve = reservesData[
             params.collateralAsset
@@ -461,7 +466,6 @@ library LiquidationLogic {
             IPriceOracleGetter(params.priceOracle)
         );
 
-        vars.liquidator = msg.sender;
         ValidationLogic.validateERC721LiquidationCall(
             userConfig,
             collateralReserve,
@@ -509,6 +513,7 @@ library LiquidationLogic {
             if (vars.userGlobalDebt > vars.actualDebtToLiquidate) {
                 // userGlobalDebt = debt across all positions (ie. if there are multiple positions)
                 // if the global debt > the actual debt that is getting liquidated then the excess amount goes to pay protocol
+                console.log("borrower supply liquidationAsset");
                 SupplyLogic.executeSupply(
                     reservesData,
                     userConfig,
@@ -519,21 +524,9 @@ library LiquidationLogic {
                         referralCode: 0
                     })
                 );
-
-                if (
-                    !userConfig.isUsingAsCollateral(liquidationAssetReserveId)
-                ) {
-                    userConfig.setUsingAsCollateral(
-                        liquidationAssetReserveId,
-                        true
-                    );
-                    emit ReserveUsedAsCollateralEnabled(
-                        params.liquidationAsset,
-                        params.user
-                    );
-                }
             } else {
                 // if the actual debt that is getting liquidated > user global debt then pay back excess to user
+                console.log("liquidator transfer liquidationAsset to borrower");
                 IERC20(params.liquidationAsset).safeTransferFrom(
                     vars.liquidator,
                     params.user,
@@ -570,7 +563,18 @@ library LiquidationLogic {
             );
         }
 
+        console.log("liquidationAmount:%s", params.liquidationAmount);
+        console.log("userTotalDebt:%s", vars.userTotalDebt);
+        console.log("actualDebtToLiquidate:%s", vars.actualDebtToLiquidate);
+        console.log("actualLiquidationAmount:%s", vars.actualLiquidationAmount);
+        console.log("userGlobalDebt:%s", vars.userGlobalDebt);
+        console.log("userCollateralBalance:%s", vars.userCollateralBalance);
+        console.log("debtCanBeCovered:%s", debtCanBeCovered);
+
         if (vars.actualDebtToLiquidate != 0) {
+            console.log(
+                "liquidator transfer actualDebtToLiquidate to ptoken and burn borrower's debt token"
+            );
             liquidationAssetReserve.updateInterestRates(
                 vars.liquidationAssetReserveCache,
                 params.liquidationAsset,
@@ -586,12 +590,16 @@ library LiquidationLogic {
         }
 
         if (params.receiveXToken) {
+            console.log("transfer ptoken from user to liquidator");
             INToken(vars.collateralXToken).transferOnLiquidation(
                 params.user,
                 vars.liquidator,
                 params.collateralTokenId
             );
         } else {
+            console.log(
+                "burn borrower's ntoken and transfer underlying to liquidator"
+            );
             _burnCollateralNTokens(params, vars);
         }
 

@@ -80,6 +80,10 @@ test-liquidation-edge:
 test-liquidation-ptoken:
 	make TEST_TARGET=liquidation-ptoken.spec.ts test
 
+.PHONY: test-liquidation-non-borrowed
+test-liquidation-non-borrowed:
+	make TEST_TARGET=liquidation-non-borrowed.spec.ts test
+
 .PHONY: test-configurator-edge
 test-configurator-edge:
 	make TEST_TARGET=configurator-edge.spec.ts test
